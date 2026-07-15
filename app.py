@@ -12,33 +12,21 @@ st.title("📊 AI Analýza a Predikce Pohybu Akcií")
 st.write("Aplikace využívá strojové učení k odhadu budoucího vývoje cen na příštích 5 dní.")
 
 # Uživatelské rozhraní
-ticker = st.text_input("Zadejte ticker akcie (např. AAPL, TSLA, NVDA, BTC-USD):", "AAPL").upper()
+ticker = st.text_input("Zadejte ticker akcie (např. AAPL, TSLA, NVDA, BTC-USD):", "AAPL").upper().strip()
 tlacitko = st.button("Spustit analýzu")
 
 if tlacitko:
     with st.spinner("Stahuji data z burzy Yahoo Finance a trénuji AI model..."):
         try:
-            # 1. Bezpečné stažení dat
-            raw_data = yf.download(ticker, period="5y", interval="1d")
+            # 1. Bezpečné stažení dat s vypnutým MultiIndexem pro eliminaci prázdných tabulek
+            data = yf.download(ticker, period="5y", interval="1d", multi_level_index=False)
             
-            if raw_data.empty:
-                st.error("Nepodařilo se stáhnout žádná data. Zkontrolujte ticker.")
+            if data.empty or len(data) < 100:
+                st.error(f"Nepodařilo se stáhnout platná data pro ticker '{ticker}'. Zkontrolujte, zda je správný.")
                 st.stop()
             
-            data = raw_data.copy()
-            
-            # Očištění MultiIndexu z nového yfinance
-            if isinstance(data.columns, pd.MultiIndex):
-                try:
-                    data = data.xs(ticker, axis=1, level=1)
-                except:
-                    data.columns = data.columns.get_level_values(0)
-            
-            if 'Close' not in data.columns:
-                st.error("V datech chybí sloupec 'Close'.")
-                st.stop()
-
-            # Převedení cen na jednorozměrné čisté pole
+            # Bezpečné vytvoření kopie a vyčištění sloupců (převedení na jednorozměrná pole)
+            data = data.copy()
             close_prices = pd.Series(data['Close'].values.flatten(), index=data.index)
 
             # 2. Matematické výpočty indikátorů přímo přes čistý Pandas
@@ -55,6 +43,7 @@ if tlacitko:
             # Výpočet MACD
             data['MACD'] = close_prices.rolling(window=12).mean() - close_prices.rolling(window=26).mean()
             
+            # Odstranění řádků s chybějícími hodnotami po výpočtech průměrů
             data = data.dropna()
 
             # 3. Příprava dat pro strojové učení
@@ -65,7 +54,7 @@ if tlacitko:
             X = data[['SMA20', 'SMA50', 'RSI', 'MACD']].values
             y = data['Target'].values
             
-            # Zajištění správného 2D tvaru pro predikci
+            # Zajištění správného 2D tvaru pro predikci z posledního řádku
             X_aktualni = X[-1].reshape(1, -1)
             
             X_model = X[:-predikce_na_dni]
@@ -99,8 +88,8 @@ if tlacitko:
             # Interaktivní graf Plotly
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=data.index, y=close_prices.loc[data.index], name='Cena akcie', line=dict(color='blue')))
-            fig.add_trace(go.Scatter(x=data.index, y=data['SMA20'], name='SMA 20', line=dict(color='orange', dash='dash')))
-            fig.add_trace(go.Scatter(x=data.index, y=data['SMA50'], name='SMA 50', line=dict(color='green', dash='dot')))
+            fig.add_trace(go.Scatter(x=data.index, y=data['SMA20'], name='SMA 20 (Krátkodobý trend)', line=dict(color='orange', dash='dash')))
+            fig.add_trace(go.Scatter(x=data.index, y=data['SMA50'], name='SMA 50 (Dlouhodobý trend)', line=dict(color='green', dash='dot')))
             fig.update_layout(title=f"Graf vývoje ceny {ticker}", xaxis_title="Datum", yaxis_title="Cena ($)", template="plotly_white")
             st.plotly_chart(fig, use_container_width=True)
             
