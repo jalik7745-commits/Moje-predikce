@@ -18,14 +18,14 @@ tlacitko = st.button("Spustit analýzu")
 if tlacitko:
     with st.spinner("Stahuji data z burzy Yahoo Finance a trénuji AI model..."):
         try:
-            # 1. Bezpečné stažení dat s vypnutým MultiIndexem pro eliminaci prázdných tabulek
+            # 1. Bezpečné stažení dat s vypnutým MultiIndexem
             data = yf.download(ticker, period="5y", interval="1d", multi_level_index=False)
             
             if data.empty or len(data) < 100:
                 st.error(f"Nepodařilo se stáhnout platná data pro ticker '{ticker}'. Zkontrolujte, zda je správný.")
                 st.stop()
             
-            # Bezpečné vytvoření kopie a vyčištění sloupců (převedení na jednorozměrná pole)
+            # Bezpečné vytvoření kopie a vyčištění sloupců
             data = data.copy()
             close_prices = pd.Series(data['Close'].values.flatten(), index=data.index)
 
@@ -43,7 +43,7 @@ if tlacitko:
             # Výpočet MACD
             data['MACD'] = close_prices.rolling(window=12).mean() - close_prices.rolling(window=26).mean()
             
-            # Odstranění řádků s chybějícími hodnotami po výpočtech průměrů
+            # Odstranění řádků s chybějícími hodnotami
             data = data.dropna()
 
             # 3. Příprava dat pro strojové učení
@@ -70,13 +70,13 @@ if tlacitko:
             # 4. Vykreslení výsledků na webové stránce
             st.subheader(f"Výsledky analýzy pro {ticker}")
             col1, col2 = st.columns(2)
-            vysledek = int(model.predict(X_aktualni)[0])
+            
             with col1:
                 st.metric(label="Úspěšnost modelu na historii (Accuracy)", value=f"{uprocenta:.2f} %")
             
-            # Výpočet finální predikce
-            vysledek = int(model.predict(X_aktualni))
-            pravdepodobnosti = model.predict_proba(X_aktualni)
+            # BEZPEČNÝ VÝPOČET FINÁLNÍ PREDIKCE S INDEXEM [0]
+            vysledek = int(model.predict(X_aktualni)[0])
+            pravdepodobnosti = model.predict_proba(X_aktualni)[0]
             pravdepodobnost_vysledku = pravdepodobnosti[vysledek] * 100
             
             with col2:
