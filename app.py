@@ -70,7 +70,7 @@ if tlacitko:
             # 4. Vykreslení výsledků na webové stránce
             st.subheader(f"Výsledky analýzy pro {ticker}")
             col1, col2 = st.columns(2)
-            
+            vysledek = int(model.predict(X_aktualni)[0])
             with col1:
                 st.metric(label="Úspěšnost modelu na historii (Accuracy)", value=f"{uprocenta:.2f} %")
             
