@@ -140,13 +140,11 @@ if tlacitko:
         with col1:
             st.metric(label="Ověřená přesnost směrového signálu (Accuracy)", value=f"{uprocenta:.2f} %", help="Úspěšnost modelu na posledních 60 dnech.")
         
-        # Bezpečné vytáhnutí čistého čísla
         predikce_raw = model.predict(X_aktualni)
         vysledek = int(predikce_raw.item())
         
-        # OPAVENO: Správná indexace 2D pole pravděpodobností [řádek 0][sloupec výsledek]
         pravdepodobnosti = model.predict_proba(X_aktualni)
-        pravdepodobnost = float(pravdepodobnosti[0][vysledek]) * 100
+        pravdepodobnost = float(pravdepodobnosti[vysledek]) * 100
         
         with col2:
             if vysledek == 1:
@@ -155,6 +153,40 @@ if tlacitko:
                 st.warning(f"🤖 VERDIKT AI: OČEKÁVÁ SE POKLES (Pravděpodobnost: {pravdepodobnost:.1f} %)")
                 
         st.info(f"Tato predikce udává směr trendu na následujících **{predikce_na_dni} obchodních dní**.")
+
+        # --- NOVÉ: KALKULAČKA ŘÍZENÍ RIZIKA (ZCELA IZOLOVANÝ BLOK) ---
+        st.markdown("---")
+        st.subheader("🧮 Inteligentní kalkulačka obchodního rizika")
+        st.write("Výpočty na základě aktuální volatility trhu (ATR) a matematického poměru zisku k riziku RRR 1:2.")
+        
+        aktualni_cena_akcie = float(close_prices.iloc[-1])
+        aktualni_atr = float(data['ATR'].iloc[-1])
+        
+        col_calc1, col_calc2 = st.columns(2)
+        
+        with col_calc1:
+            st.info(f"**Aktuální cena akcie:** ${aktualni_cena_akcie:,.2f}")
+            st.write(f"Průměrný denní pohyb (ATR): ${aktualni_atr:.2f}")
+        
+        with col_calc2:
+            if vysledek == 1:
+                # Pokud AI předpovídá růst (Long obchod)
+                stop_loss = aktualni_cena_akcie - (aktualni_atr * 1.5)
+                target_profit = aktualni_cena_akcie + (aktualni_atr * 3.0) # Poměr RRR 1:2
+                
+                st.write("👉 **Doporučené nastavení pro nákup (LONG):**")
+                st.error(f"🛑 **Stop-Loss (Ukončení ztráty):** ${stop_loss:.2f}")
+                st.success(f"🎯 **Take-Profit (Výběr zisku):** ${target_profit:.2f}")
+            else:
+                # Pokud AI předpovídá pokles (Short obchod)
+                stop_loss = aktualni_cena_akcie + (aktualni_atr * 1.5)
+                target_profit = aktualni_cena_akcie - (aktualni_atr * 3.0) # Poměr RRR 1:2
+                
+                st.write("👉 **Doporučené nastavení pro spekulaci na pokles (SHORT):**")
+                st.error(f"🛑 **Stop-Loss (Ukončení ztráty):** ${stop_loss:.2f}")
+                st.success(f"🎯 **Take-Profit (Výběr zisku):** ${target_profit:.2f}")
+                
+        st.markdown("---")
 
         # 6. TECHNICKÝ GRAF PRO KONTROLU
         fig_ind = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, subplot_titles=('Cena akcie', 'RSI', 'MACD'))
@@ -167,4 +199,3 @@ if tlacitko:
         fig_ind.add_trace(go.Scatter(x=data.index, y=data['MACD'], name='MACD', line=dict(color='#e377c2')), row=3, col=1)
         fig_ind.add_trace(go.Scatter(x=data.index, y=data['MACD_Signal'], name='Signál', line=dict(color='#bcbd22', width=1)), row=3, col=1)
         fig_ind.update_layout(height=650, template="plotly_white", showlegend=True, xaxis3_title="Datum")
-        st.plotly_chart(fig_ind, use_container_width=True)
