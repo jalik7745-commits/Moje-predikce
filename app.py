@@ -61,24 +61,33 @@ if tlacitko:
         data['MACD'] = close_prices.ewm(span=12, adjust=False).mean() - close_prices.ewm(span=26, adjust=False).mean()
         data['MACD_Signal'] = data['MACD'].ewm(span=9, adjust=False).mean()
         
-        # NOVÉ: ATR (Průměrný skutečný rozsah - volatilita)
+        # ATR (Průměrný skutečný rozsah - volatilita)
         tr1 = high_prices - low_prices
         tr2 = abs(high_prices - close_prices.shift(1))
         tr3 = abs(low_prices - close_prices.shift(1))
         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
         data['ATR'] = tr.rolling(window=14).mean()
         
-        # NOVÉ: Tržní Momentum (Hybnost ceny za 10 dní)
+        # Tržní Momentum (Hybnost ceny za 10 dní)
         data['Momentum'] = close_prices.diff(10)
 
-        # 3. Sidebar fundamenty (Informativní)
+        # 3. Sidebar fundamenty
         st.sidebar.subheader("📋 Finanční fundamenty")
+        pe_ratio, profit_margin = 0.0, 0.0
         try:
             info = yf.Ticker(ticker).info
-            st.sidebar.write(f"**P/E Ratio:** {info.get('trailingPE', 0):.2f}")
-            st.sidebar.write(f"**Zisková marže:** {info.get('profitMargins', 0)*100:.1f} %")
+            pe_ratio = info.get('trailingPE', 0) or 0
+            profit_margin = info.get('profitMargins', 0) or 0
+            st.sidebar.write(f"**P/E Ratio:** {pe_ratio:.2f}" if pe_ratio else "**P/E Ratio:** N/A")
+            st.sidebar.write(f"**Zisková marže:** {profit_margin*100:.1f} %")
         except:
             st.sidebar.write("Fundamentální data nedostupná.")
+
+        data['PE'] = pe_ratio
+        data['Margin'] = profit_margin
+        
+        # Fixní neutrální sentiment (když se RSS nenačítá)
+        data['Sentiment'] = 0.0
 
         data = data.dropna()
 
@@ -87,29 +96,29 @@ if tlacitko:
         target_values = np.where(close_prices.shift(-predikce_na_dni) > close_prices, 1, 0)
         data['Target'] = target_values[:len(data)]
         
-        # Seznam všech vlastností zkonstruovaných pro maximální přesnost
-        vlastnosti = ['SMA20', 'SMA50', 'RSI', 'MACD', 'SP500_Close', 'VIX_Close', 'ATR', 'Momentum']
+        # Seznam všech vlastností (Celkem 9 sloupců pro model)
+        vlastnosti = ['SMA20', 'SMA50', 'RSI', 'MACD', 'SP500_Close', 'VIX_Close', 'ATR', 'Momentum', 'PE', 'Margin', 'Sentiment']
         X = data[vlastnosti].to_numpy()
         y = data['Target'].to_numpy().flatten()
         
-        # Poslední řádek je náš dnešní stav trhu k predikci
+        # Poslední řádek k predikci dneška
         X_aktualni = X[-1].reshape(1, -1)
         
-        # Učení probíhá na historických datech bez posledních 5 dní (u kterých ještě neznáme výsledek)
+        # Odříznutí budoucnosti pro trénink
         X_model = X[:-predikce_na_dni]
         y_model = y[:-predikce_na_dni]
         
-        # Rozdělení na trénovací a validační vzorek (posledních 60 obchodních dní jako test stability)
+        # Rozdělení na trénovací a validační vzorek chronologicky (posledních 60 dní)
         X_train, X_val = X_model[:-60], X_model[-60:]
         y_train, y_val = y_model[:-60], y_model[-60:]
         
-        # Konfigurace XGBoost zaměřená proti přeučení (vysoká zobecňovací schopnost)
+        # Konfigurace XGBoost proti přeučení
         model = XGBClassifier(
-            max_depth=3,            # Mělčí stromy brání pamatování si šumu
-            learning_rate=0.03,      # Pomalejší učení pro stabilnější konvergenci
-            n_estimators=120,       # Vyvážený počet iterací
-            subsample=0.8,          # Model vidí pokaždé jen 80% řádků (odolnost vůči anomáliím)
-            colsample_bytree=0.8,   # Model vidí pokaždé jen 80% indikátorů
+            max_depth=3,            
+            learning_rate=0.03,      
+            n_estimators=120,       
+            subsample=0.8,          
+            colsample_bytree=0.8,   
             eval_metric='logloss',
             random_state=42,
             n_jobs=1
@@ -118,15 +127,19 @@ if tlacitko:
         model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
         uprocenta = model.score(X_val, y_val) * 100
 
-        # 5. ZOBRAZENÍ FINÁLNÍHO VERDIKTU AI
+        # 5. ZOBRAZENÍ FINÁLNÍHO VERDIKTU AI (Bezpečné vytažení skaláru)
         st.subheader(f"🎯 Výsledek matematické optimalizace pro {ticker}")
         
         col1, col2 = st.columns(2)
         with col1:
-            st.metric(label="Ověřená přesnost směrového signálu (Accuracy)", value=f"{uprocenta:.2f} %", help="Úspěšnost modelu na posledních 60 dnech před dneškem.")
+            st.metric(label="Ověřená přesnost směrového signálu (Accuracy)", value=f"{uprocenta:.2f} %", help="Úspěšnost modelu na posledních 60 dnech.")
         
-        vysledek = int(model.predict(X_aktualni))
-        pravdepodobnost = model.predict_proba(X_aktualni)[vysledek] * 100
+        # Bezpečné vytáhnutí čistého čísla z NumPy/XGBoost pole pomocí .item()
+        predikce_raw = model.predict(X_aktualni)
+        vysledek = int(predikce_raw[0].item())
+        
+        pravdepodobnosti = model.predict_proba(X_aktualni)
+        pravdepodobnost = pravdepodobnosti[0][vysledek] * 100
         
         with col2:
             if vysledek == 1:
@@ -134,7 +147,7 @@ if tlacitko:
             else:
                 st.warning(f"🤖 VERDIKT AI: OČEKÁVÁ SE POKLES (Pravděpodobnost: {pravdepodobnost:.1f} %)")
                 
-        st.info(f"Tato predikce udává směr trendu na následujících **{predikce_na_dni} obchodních dní** na základě dnešní tržní konstelace.")
+        st.info(f"Tato predikce udává směr trendu na následujících **{predikce_na_dni} obchodních dní**.")
 
         # 6. TECHNICKÝ GRAF PRO KONTROLU
         fig_ind = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, subplot_titles=('Cena akcie', 'RSI', 'MACD'))
