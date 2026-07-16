@@ -21,12 +21,13 @@ st.set_page_config(page_title="ULTIMATE AI Akciový Prediktor", layout="wide")
 st.title("🦅 ULTIMATE AI Analytická Platforma (XGBoost Engine)")
 st.write("Finanční predikce poháněná algoritmem XGBoost s automatickým laděním parametrů v reálném čase.")
 
-# --- CACHED POMOCNÉ FUNKCE (IZOLOVANÉ) ---
+# --- CACHED POMOCNÉ FUNKCE (Zabezpečené proti MultiIndexu) ---
 @st.cache_data(ttl=3600)  
 def stahni_data(ticker):
-    d = yf.download(ticker, period="5y", interval="1d")
-    s = yf.download("^GSPC", period="5y", interval="1d")
-    v = yf.download("^VIX", period="5y", interval="1d")
+    # Vynucení ploché struktury pomocí multi_level_index=False
+    d = yf.download(ticker, period="5y", interval="1d", multi_level_index=False)
+    s = yf.download("^GSPC", period="5y", interval="1d", multi_level_index=False)
+    v = yf.download("^VIX", period="5y", interval="1d", multi_level_index=False)
     return d, s, v
 
 @st.cache_data(ttl=1800)  
@@ -47,7 +48,7 @@ def stahni_rss(ticker):
     return titles
 
 # --- UŽIVATELSKÝ VSTUP ---
-ticker = st.text_input("Zadejte ticker akcie:", "AAPL").upper().strip()
+ticker = st.text_input("Zadejte ticker akcie (např. AAPL, NVDA, TSLA):", "AAPL").upper().strip()
 tlacitko = st.button("Spustit ULTIMATE AI analýzu")
 
 if tlacitko:
@@ -55,22 +56,36 @@ if tlacitko:
         # 1. Načtení dat
         raw_data, sp500, vix = stahni_data(ticker)
         
-        if raw_data.empty or sp500.empty or vix.empty:
-            st.error("Chyba při stahování dat z trhu.")
+        # Pojistka: Pokud by Yahoo selhalo, zkusíme stáhnout data bez vyrovnávací paměti
+        if raw_data.empty:
+            raw_data = yf.download(ticker, period="5y", interval="1d", multi_level_index=False)
+        
+        if raw_data.empty:
+            st.error(f"Nepodařilo se načíst data pro ticker '{ticker}'. Zkontrolujte správnost symbolu.")
             st.stop()
             
         data = raw_data.copy()
         
-        # Srovnání indexů (MultiIndex fix)
+        # Vyčištění případného skrytého MultiIndexu z yfinance
         if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
         if isinstance(sp500.columns, pd.MultiIndex): sp500.columns = sp500.columns.get_level_values(0)
         if isinstance(vix.columns, pd.MultiIndex): vix.columns = vix.columns.get_level_values(0)
 
+        # Bezpečné vytažení Close cen jako 1D Series
         close_prices = pd.Series(data['Close'].to_numpy().flatten(), index=data.index)
         
+        # Spojení indexů podle časové osy hlavní akcie
         data = data.loc[~data.index.duplicated(keep='first')]
-        data['SP500_Close'] = pd.Series(sp500['Close'].to_numpy().flatten(), index=sp500.index)
-        data['VIX_Close'] = pd.Series(vix['Close'].to_numpy().flatten(), index=vix.index)
+        
+        if not sp500.empty:
+            data['SP500_Close'] = pd.Series(sp500['Close'].to_numpy().flatten(), index=sp500.index)
+        else:
+            data['SP500_Close'] = data['Close'] # Záloha pokud index selže
+            
+        if not vix.empty:
+            data['VIX_Close'] = pd.Series(vix['Close'].to_numpy().flatten(), index=vix.index)
+        else:
+            data['VIX_Close'] = 20.0 # Průměrná neutrální hodnota strachu
 
         # 2. Technické indikátory
         data['SMA20'] = close_prices.rolling(window=20).mean()
@@ -116,10 +131,12 @@ if tlacitko:
             st.sidebar.write("Žádné zprávy nenalezeny.")
 
         data['Sentiment'] = vysledny_sentiment
+        
+        # Odstranění prázdných řádků vzniklých klouzavými průměry
         data = data.dropna()
 
         if data.empty:
-            st.error("Nedostatek dat pro analýzu.")
+            st.error("Nedostatek historických dat pro sestavení indikátorů. Zkuste jinou akcii.")
             st.stop()
 
         # 5. Pokročilá příprava dat pro XGBoost
@@ -137,7 +154,7 @@ if tlacitko:
         
         X_train, X_test, y_train, y_test = train_test_split(X_model, y_model, test_size=0.2, random_state=42)
         
-        # 6. AUTOMATICKÉ LADĚNÍ PARAMETRŮ (GridSearchCV) - OPRAVENO ZDE
+        # 6. AUTOMATICKÉ LADĚNÍ PARAMETRŮ (GridSearchCV)
         param_grid = {
             'max_depth': [3, 5, 7],
             'learning_rate': [0.01, 0.05, 0.1],
@@ -148,7 +165,6 @@ if tlacitko:
         grid_search = GridSearchCV(estimator=base_model, param_grid=param_grid, cv=3, scoring='accuracy', n_jobs=-1)
         grid_search.fit(X_train, y_train)
         
-        # Výběr nejlepšího modelu
         model = grid_search.best_estimator_
         uprocenta = model.score(X_test, y_test) * 100
 
