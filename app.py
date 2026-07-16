@@ -7,26 +7,17 @@ from plotly.subplots import make_subplots
 import requests
 import xml.etree.ElementTree as ET
 from xgboost import XGBClassifier
-from sklearn.model_selection import GridSearchCV
-import nltk
-from nltk.sentiment.vader import SentimentIntensityAnalyzer
-
-# Inicializace NLTK
-try:
-    nltk.data.find('sentiment/vader_lexicon.zip')
-except LookupError:
-    nltk.download('vader_lexicon', quiet=True)
 
 st.set_page_config(page_title="ULTIMATE AI Akciový Prediktor", layout="wide")
 st.title("🦅 ULTIMATE AI Analytická Platforma & Backtester")
-st.write("Predikce algoritmem XGBoost doplněná o historickou simulaci vývoje kapitálu (Backtesting).")
+st.write("Optimalizovaná a odlehčený verze s XGBoost modelem šetrným k operační paměti.")
 
-# --- CACHED POMOCNÉ FUNKCE ---
+# --- DATOVÉ FUNKCE (Omezeno na 3 roky pro úsporu RAM) ---
 @st.cache_data(ttl=3600)  
 def stahni_data(ticker):
-    d = yf.download(ticker, period="5y", interval="1d", multi_level_index=False)
-    s = yf.download("^GSPC", period="5y", interval="1d", multi_level_index=False)
-    v = yf.download("^VIX", period="5y", interval="1d", multi_level_index=False)
+    d = yf.download(ticker, period="3y", interval="1d", multi_level_index=False)
+    s = yf.download("^GSPC", period="3y", interval="1d", multi_level_index=False)
+    v = yf.download("^VIX", period="3y", interval="1d", multi_level_index=False)
     return d, s, v
 
 @st.cache_data(ttl=1800)  
@@ -38,7 +29,7 @@ def stahni_rss(ticker):
         r = requests.get(url, headers=headers, timeout=5)
         if r.status_code == 200:
             root = ET.fromstring(r.content)
-            for item in root.findall('.//item')[:6]:  
+            for item in root.findall('.//item')[:4]:  
                 t = item.find('title')
                 if t is not None and t.text:
                     titles.append(t.text.strip())
@@ -48,18 +39,18 @@ def stahni_rss(ticker):
 
 # --- UŽIVATELSKÝ VSTUP ---
 ticker = st.text_input("Zadejte ticker akcie (např. AAPL, NVDA, TSLA):", "AAPL").upper().strip()
-tlacitko = st.button("Spustit ULTIMATE AI analýzu s Backtestingem")
+tlacitko = st.button("Spustit ULTIMATE AI analýzu")
 
 if tlacitko:
-    with st.spinner("Stahuji data, optimalizuji XGBoost a simuluji historické obchody..."):
+    with st.spinner("Provádím rychlou a úspornou AI analýzu..."):
         # 1. Načtení dat
         raw_data, sp500, vix = stahni_data(ticker)
         
         if raw_data.empty:
-            raw_data = yf.download(ticker, period="5y", interval="1d", multi_level_index=False)
+            raw_data = yf.download(ticker, period="3y", interval="1d", multi_level_index=False)
         
         if raw_data.empty:
-            st.error(f"Nepodařilo se načíst data pro ticker '{ticker}'. Zkontrolujte symbol.")
+            st.error(f"Nepodařilo se načíst data pro ticker '{ticker}'.")
             st.stop()
             
         data = raw_data.copy()
@@ -93,7 +84,7 @@ if tlacitko:
         data['MACD'] = close_prices.ewm(span=12, adjust=False).mean() - close_prices.ewm(span=26, adjust=False).mean()
         data['MACD_Signal'] = data['MACD'].ewm(span=9, adjust=False).mean()
 
-        # 3. Fundamentální data
+        # 3. Fundamentální data (Sidebar)
         st.sidebar.subheader("📋 Finanční zdraví")
         pe_ratio, profit_margin = 0.0, 0.0
         try:
@@ -108,19 +99,13 @@ if tlacitko:
         data['PE'] = pe_ratio
         data['Margin'] = profit_margin
 
-        # 4. Sentiment analýza zpráv
+        # 4. Sentiment zpráv
         st.sidebar.subheader("📰 Titulky zpráv")
-        sia = SentimentIntensityAnalyzer()
         vysledny_sentiment = 0.0
         titulky = stahni_rss(ticker)
-        
         if titulky:
             for t in titulky:
-                score = sia.polarity_scores(t)['compound']
-                vysledny_sentiment += score
-                ikona = "🟢" if score > 0.05 else "🔴" if score < -0.05 else "⚪"
-                st.sidebar.write(f"{ikona} {t[:70]}...")
-            vysledny_sentiment /= len(titulky)
+                st.sidebar.write(f"⚪ {t[:70]}...")
         else:
             st.sidebar.write("Žádné zprávy nenalezeny.")
 
@@ -128,10 +113,10 @@ if tlacitko:
         data = data.dropna()
 
         if data.empty:
-            st.error("Nedostatek dat po výpočtu indikátorů.")
+            st.error("Nedostatek dat pro analýzu.")
             st.stop()
 
-        # 5. Cílová proměnná a rozdělení podle času (Ochrana proti Data Leakage)
+        # 5. Chronologické rozdělení dat (80% trénink, 20% test)
         predikce_na_dni = 5
         target_values = np.where(close_prices.shift(-predikce_na_dni) > close_prices, 1, 0)
         data['Target'] = target_values[:len(data)]
@@ -150,29 +135,26 @@ if tlacitko:
         
         X_aktualni = data[vlastnosti].to_numpy()[-1].reshape(1, -1)
 
-        # 6. Trénování a optimalizace modelu XGBoost
-        param_grid = {
-            'max_depth':,
-            'learning_rate': [0.01, 0.05, 0.1],
-            'n_estimators': [50, 100, 150]
-        }
-        
-        base_model = XGBClassifier(eval_metric='logloss', random_state=42)
-        grid_search = GridSearchCV(estimator=base_model, param_grid=param_grid, cv=3, scoring='accuracy', n_jobs=-1)
-        grid_search.fit(X_train, y_train)
-        
-        model = grid_search.best_estimator_
+        # 6. FIXNÍ POHODLNÝ XGBOOST MODEL (Extrémně úsporný na RAM)
+        model = XGBClassifier(
+            max_depth=4, 
+            learning_rate=0.05, 
+            n_estimators=80, 
+            eval_metric='logloss', 
+            random_state=42,
+            n_jobs=1  # Vynucení jednoho vlákna pro stabilitu paměti
+        )
+        model.fit(X_train, y_train)
         uprocenta = model.score(X_test, y_test) * 100
 
-        # 7. SIMULACE OBCHODOVÁNÍ (Backtesting)
+        # 7. BACKTESTING
         test_predictions = model.predict(X_test)
-        
         kapital = 10000.0  
         pozice = 0.0       
         historie_kapitalu = []
         historie_buy_hold = []
         
-        pocatecni_cena = test_data['Close'].iloc[0]
+        pocatecni_cena = test_data['Close'].iloc
         mnozstvi_buy_hold = kapital / pocatecni_cena
         
         for i in range(len(test_data)):
@@ -207,27 +189,35 @@ if tlacitko:
             st.metric(label="Finální hodnota AI účtu", value=f"${final_ai_vybava:,.2f}", delta=f"{ai_procenta:.1f} % zisku")
         
         vysledek = int(model.predict(X_aktualni))
-        pravdepodobnost = model.predict_proba(X_aktualni)[0][vysledek] * 100
+        pravdepodobnost = model.predict_proba(X_aktualni)[vysledek] * 100
         
         with col3:
             if vysledek == 1:
-                st.success(f"🤖 AI PREDPOVÍDÁ: RŮST DO {predikce_na_dni} DNÍ ({pravdepodobnost:.1f} %)")
+                st.success(f"🤖 AI PREDPOVÍDÁ: RŮST DO 5 DNÍ ({pravdepodobnost:.1f} %)")
             else:
-                st.warning(f"🤖 AI PREDPOVÍDÁ: POKLES DO {predikce_na_dni} DNÍ ({pravdepodobnost:.1f} %)")
+                st.warning(f"🤖 AI PREDPOVÍDÁ: POKLES DO 5 DNÍ ({pravdepodobnost:.1f} %)")
 
-        st.write(f"**Výsledek simulace (počáteční vklad $10,000):** AI dosáhla koncového stavu **${final_ai_vybava:,.2f}**, zatímco pasivní strategie Kup a drž by vygenerovala **${final_bh_vybava:,.2f}**.")
+        st.write(f"**Výsledek simulace (počáteční vklad $10,000):** AI dosáhla stavu **${final_ai_vybava:,.2f}**, pasivní strategie Kup a drž **${final_bh_vybava:,.2f}**.")
 
-        # 9. VYCRESLENÍ GRAFŮ (Rozděleno do dvou bloků kvůli bezchybné syntaxi)
+        # 9. VYCRESLENÍ GRAFŮ
         st.subheader("📈 Vývoj simulovaného kapitálu")
         fig_cap = go.Figure()
-        fig_cap.add_trace(go.Scatter(x=test_data.index, y=test_data['AI_Strategie'], name='AI Obchodní Engine', line=dict(color='#2ca02c', width=3)))
-        fig_cap.add_trace(go.Scatter(x=test_data.index, y=test_data['Buy_Hold_Strategie'], name='Pasivní Kup a drž', line=dict(color='#7f7f7f', width=2, dash='dot')))
-        fig_cap.update_layout(height=400, template="plotly_white", showlegend=True, xaxis_title="Datum", yaxis_title="Hodnota účtu ($)")
+        fig_cap.add_trace(go.Scatter(x=test_data.index, y=test_data['AI_Strategie'], name='AI Engine', line=dict(color='#2ca02c', width=3)))
+        fig_cap.add_trace(go.Scatter(x=test_data.index, y=test_data['Buy_Hold_Strategie'], name='Kup a drž', line=dict(color='#7f7f7f', width=2, dash='dot')))
+        fig_cap.update_layout(height=350, template="plotly_white", showlegend=True, xaxis_title="Datum")
         st.plotly_chart(fig_cap, use_container_width=True)
 
         st.subheader("📊 Analýza trhu a technické indikátory")
-        fig_ind = make_subplots(
-            rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05,
-            subplot_titles=('Cena akcie a klouzavé průměry', 'RSI Indikátor', 'MACD')
-        )
+        fig_ind = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, subplot_titles=('Cena akcie', 'RSI', 'MACD'))
+        
+        fig_ind.add_trace(go.Scatter(x=data.index, y=close_prices.loc[data.index], name='Cena', line=dict(color='#1f77b4', width=2)), row=1, col=1)
+        fig_ind.add_trace(go.Scatter(x=data.index, y=data['SMA20'], name='SMA 20', line=dict(color='#ff7f0e', dash='dash')), row=1, col=1)
+        fig_ind.add_trace(go.Scatter(x=data.index, y=data['SMA50'], name='SMA 50', line=dict(color='#d62728', dash='dot')), row=1, col=1)
+        
+        fig_ind.add_trace(go.Scatter(x=data.index, y=data['RSI'], name='RSI', line=dict(color='#9467bd')), row=2, col=1)
+        fig_ind.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
+        fig_ind.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
+        
+        fig_ind.add_trace(go.Scatter(x=data.index, y=data['MACD'], name='MACD', line=dict(color='#e377c2')), row=3, col=1)
+        fig_ind.add_trace(go.Scatter(x=data.index, y=data['MACD_Signal'], name='Signál', line=dict(color='#bcbd22', width=1)), row=3, col=1)
         
