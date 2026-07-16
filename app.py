@@ -8,9 +8,9 @@ from xgboost import XGBClassifier
 
 st.set_page_config(page_title="HIGH-PRECISION AI Engine", layout="wide")
 st.title("🦅 Nejpřesnější AI Prediktor (XGBoost High-Precision)")
-st.write("Veškerý výkon je alokován do matematické optimalizace dnešního směrového signálu.")
+st.write("Veškerý výkon je alokován do pokročilé matematické transformace indikátorů pro dnešní den.")
 
-# --- ODLEHČENÉ NAČTÍTÁNÍ DAT (3 roky pro ideální trénovací vzorek) ---
+# --- ODLEHČENÉ NAČTÍTÁNÍ DAT ---
 @st.cache_data(ttl=1800)  
 def stahni_cista_data(ticker):
     d = yf.download(ticker, period="3y", interval="1d", multi_level_index=False)
@@ -47,21 +47,34 @@ if tlacitko:
         data['SP500_Close'] = pd.Series(sp500['Close'].to_numpy().flatten(), index=sp500.index)
         data['VIX_Close'] = pd.Series(vix['Close'].to_numpy().flatten(), index=vix.index)
 
-        # 2. POKROČILÝ FEATURE ENGINEERING (Klíč k přesnosti AI)
+        # 2. POKROČILÝ FEATURE ENGINEERING (Transformace pro zvýšení přesnosti)
+        # Klouzavé průměry
         data['SMA20'] = close_prices.rolling(window=20).mean()
         data['SMA50'] = close_prices.rolling(window=50).mean()
         
-        # RSI Výpočet
+        # NOVÉ: Procentuální vzdálenost od průměrů (odstraňuje surové ceny a ukazuje anomálie)
+        data['Dist_SMA20'] = (close_prices - data['SMA20']) / data['SMA20']
+        data['Dist_SMA50'] = (close_prices - data['SMA50']) / data['SMA50']
+        
+        # RSI Výpočet a jeho hybnost (Změna RSI za 3 dny)
         delta = close_prices.diff()
         gain = delta.clip(lower=0).rolling(window=14).mean()
         loss = (-delta.clip(upper=0)).rolling(window=14).mean()
         data['RSI'] = 100 - (100 / (1 + (gain / (loss + 1e-9))))
+        data['RSI_ROC'] = data['RSI'].diff(3) # Rychlost změny RSI
         
-        # MACD
+        # MACD a jeho histogram (rozdíl mezi MACD a signálem - klíčový indikátor otočení trendu)
         data['MACD'] = close_prices.ewm(span=12, adjust=False).mean() - close_prices.ewm(span=26, adjust=False).mean()
         data['MACD_Signal'] = data['MACD'].ewm(span=9, adjust=False).mean()
+        data['MACD_Hist'] = data['MACD'] - data['MACD_Signal']
         
-        # ATR (Průměrný skutečný rozsah - volatilita)
+        # NOVÉ: Bollingerova pásma (Vzdálenost ceny od horního/spodního pásma volatility)
+        std20 = close_prices.rolling(window=20).std()
+        data['BB_High'] = data['SMA20'] + (std20 * 2)
+        data['BB_Low'] = data['SMA20'] - (std20 * 2)
+        data['BB_Position'] = (close_prices - data['BB_Low']) / (data['BB_High'] - data['BB_Low'] + 1e-9)
+
+        # ATR (Volatilita)
         tr1 = high_prices - low_prices
         tr2 = abs(high_prices - close_prices.shift(1))
         tr3 = abs(low_prices - close_prices.shift(1))
@@ -85,8 +98,6 @@ if tlacitko:
 
         data['PE'] = pe_ratio
         data['Margin'] = profit_margin
-        
-        # Fixní neutrální sentiment (když se RSS nenačítá)
         data['Sentiment'] = 0.0
 
         data = data.dropna()
@@ -96,27 +107,23 @@ if tlacitko:
         target_values = np.where(close_prices.shift(-predikce_na_dni) > close_prices, 1, 0)
         data['Target'] = target_values[:len(data)]
         
-        # Seznam všech vlastností (Celkem 9 sloupců pro model)
-        vlastnosti = ['SMA20', 'SMA50', 'RSI', 'MACD', 'SP500_Close', 'VIX_Close', 'ATR', 'Momentum', 'PE', 'Margin', 'Sentiment']
+        # NOVÝ SEZNAM INDIKÁTORŮ: Odstranili jsme surovou cenu SMA a nahradili ji čistě matematickými poměry
+        vlastnosti = ['Dist_SMA20', 'Dist_SMA50', 'RSI', 'RSI_ROC', 'MACD_Hist', 'BB_Position', 'SP500_Close', 'VIX_Close', 'ATR', 'Momentum', 'PE', 'Margin', 'Sentiment']
         X = data[vlastnosti].to_numpy()
         y = data['Target'].to_numpy().flatten()
         
-        # Poslední řádek k predikci dneška
         X_aktualni = X[-1].reshape(1, -1)
         
-        # Odříznutí budoucnosti pro trénink
         X_model = X[:-predikce_na_dni]
         y_model = y[:-predikce_na_dni]
         
-        # Rozdělení na trénovací a validační vzorek chronologicky (posledních 60 dní)
         X_train, X_val = X_model[:-60], X_model[-60:]
         y_train, y_val = y_model[:-60], y_model[-60:]
         
-        # Konfigurace XGBoost proti přeučení
         model = XGBClassifier(
             max_depth=3,            
             learning_rate=0.03,      
-            n_estimators=120,       
+            n_estimators=130, # Mírně navýšeno pro zpracování nových hlubších vztahů       
             subsample=0.8,          
             colsample_bytree=0.8,   
             eval_metric='logloss',
@@ -127,19 +134,18 @@ if tlacitko:
         model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
         uprocenta = model.score(X_val, y_val) * 100
 
-        # 5. ZOBRAZENÍ FINÁLNÍHO VERDIKTU AI (Bezpečné vytažení skaláru)
+        # 5. ZOBRAZENÍ FINÁLNÍHO VERDIKTU AI
         st.subheader(f"🎯 Výsledek matematické optimalizace pro {ticker}")
         
         col1, col2 = st.columns(2)
         with col1:
             st.metric(label="Ověřená přesnost směrového signálu (Accuracy)", value=f"{uprocenta:.2f} %", help="Úspěšnost modelu na posledních 60 dnech.")
         
-        # Bezpečné vytáhnutí čistého čísla z NumPy/XGBoost pole pomocí .item()
         predikce_raw = model.predict(X_aktualni)
-        vysledek = int(predikce_raw[0].item())
+        vysledek = int(predikce_raw.item())
         
         pravdepodobnosti = model.predict_proba(X_aktualni)
-        pravdepodobnost = pravdepodobnosti[0][vysledek] * 100
+        pravdepodobnost = pravdepodobnosti[vysledek] * 100
         
         with col2:
             if vysledek == 1:
