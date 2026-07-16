@@ -140,11 +140,13 @@ if tlacitko:
         with col1:
             st.metric(label="Ověřená přesnost směrového signálu (Accuracy)", value=f"{uprocenta:.2f} %", help="Úspěšnost modelu na posledních 60 dnech.")
         
+        # Bezpečné vytáhnutí čistého čísla
         predikce_raw = model.predict(X_aktualni)
         vysledek = int(predikce_raw.item())
         
+        # OPRAVENO: Správná 2D indexace [0][vysledek] pro vytažení přesného skaláru z matice
         pravdepodobnosti = model.predict_proba(X_aktualni)
-        pravdepodobnost = float(pravdepodobnosti[vysledek]) * 100
+        pravdepodobnost = float(pravdepodobnosti[0][vysledek]) * 100
         
         with col2:
             if vysledek == 1:
@@ -154,7 +156,7 @@ if tlacitko:
                 
         st.info(f"Tato predikce udává směr trendu na následujících **{predikce_na_dni} obchodních dní**.")
 
-        # --- NOVÉ: KALKULAČKA ŘÍZENÍ RIZIKA (ZCELA IZOLOVANÝ BLOK) ---
+        # --- KALKULAČKA ŘÍZENÍ RIZIKA ---
         st.markdown("---")
         st.subheader("🧮 Inteligentní kalkulačka obchodního rizika")
         st.write("Výpočty na základě aktuální volatility trhu (ATR) a matematického poměru zisku k riziku RRR 1:2.")
@@ -170,17 +172,15 @@ if tlacitko:
         
         with col_calc2:
             if vysledek == 1:
-                # Pokud AI předpovídá růst (Long obchod)
                 stop_loss = aktualni_cena_akcie - (aktualni_atr * 1.5)
-                target_profit = aktualni_cena_akcie + (aktualni_atr * 3.0) # Poměr RRR 1:2
+                target_profit = aktualni_cena_akcie + (aktualni_atr * 3.0)
                 
                 st.write("👉 **Doporučené nastavení pro nákup (LONG):**")
                 st.error(f"🛑 **Stop-Loss (Ukončení ztráty):** ${stop_loss:.2f}")
                 st.success(f"🎯 **Take-Profit (Výběr zisku):** ${target_profit:.2f}")
             else:
-                # Pokud AI předpovídá pokles (Short obchod)
                 stop_loss = aktualni_cena_akcie + (aktualni_atr * 1.5)
-                target_profit = aktualni_cena_akcie - (aktualni_atr * 3.0) # Poměr RRR 1:2
+                target_profit = aktualni_cena_akcie - (aktualni_atr * 3.0)
                 
                 st.write("👉 **Doporučené nastavení pro spekulaci na pokles (SHORT):**")
                 st.error(f"🛑 **Stop-Loss (Ukončení ztráty):** ${stop_loss:.2f}")
@@ -199,3 +199,4 @@ if tlacitko:
         fig_ind.add_trace(go.Scatter(x=data.index, y=data['MACD'], name='MACD', line=dict(color='#e377c2')), row=3, col=1)
         fig_ind.add_trace(go.Scatter(x=data.index, y=data['MACD_Signal'], name='Signál', line=dict(color='#bcbd22', width=1)), row=3, col=1)
         fig_ind.update_layout(height=650, template="plotly_white", showlegend=True, xaxis3_title="Datum")
+        st.plotly_chart(fig_ind, use_container_width=True)
