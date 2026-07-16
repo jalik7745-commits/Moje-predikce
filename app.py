@@ -6,8 +6,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import requests
 import xml.etree.ElementTree as ET
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
+from xgboost import XGBClassifier
+from sklearn.model_selection import train_test_split, GridSearchCV
 import nltk
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 
@@ -17,9 +17,9 @@ try:
 except LookupError:
     nltk.download('vader_lexicon', quiet=True)
 
-st.set_page_config(page_title="PRO AI Akciový Prediktor", layout="wide")
-st.title("🚀 Profesionální AI Analytická Platforma")
-st.write("Kombinace tržních indexů, technických indikátorů, finančního zdraví a stabilního sentimentu zpráv.")
+st.set_page_config(page_title="ULTIMATE AI Akciový Prediktor", layout="wide")
+st.title("🦅 ULTIMATE AI Analytická Platforma (XGBoost Engine)")
+st.write("Finanční predikce poháněná algoritmem XGBoost s automatickým laděním parametrů v reálném čase.")
 
 # --- CACHED POMOCNÉ FUNKCE (IZOLOVANÉ) ---
 @st.cache_data(ttl=3600)  
@@ -31,7 +31,7 @@ def stahni_data(ticker):
 
 @st.cache_data(ttl=1800)  
 def stahni_rss(ticker):
-    url = "https://apps.marketwatch.com/rss/marketwatch/topstories" if "." in ticker else f"https://apps.marketwatch.com/rss/keyword/{ticker}"
+    url = "https://marketwatch.com" if "." in ticker else f"https://marketwatch.com{ticker}"
     headers = {'User-Agent': 'Mozilla/5.0'}
     titles = []
     try:
@@ -48,12 +48,11 @@ def stahni_rss(ticker):
 
 # --- UŽIVATELSKÝ VSTUP ---
 ticker = st.text_input("Zadejte ticker akcie:", "AAPL").upper().strip()
-tlacitko = st.button("Spustit komplexní PRO analýzu")
+tlacitko = st.button("Spustit ULTIMATE AI analýzu")
 
-# Spuštění výpočtu pouze po stisknutí tlačítka
 if tlacitko:
-    with st.spinner("Zpracovávám analýzu..."):
-        # 1. Stažení dat
+    with st.spinner("Stahuji data a optimalizuji matematický model XGBoost..."):
+        # 1. Načtení dat
         raw_data, sp500, vix = stahni_data(ticker)
         
         if raw_data.empty or sp500.empty or vix.empty:
@@ -123,7 +122,7 @@ if tlacitko:
             st.error("Nedostatek dat pro analýzu.")
             st.stop()
 
-        # 5. AI Model (Random Forest)
+        # 5. Pokročilá příprava dat pro XGBoost
         predikce_na_dni = 5
         target_values = np.where(close_prices.shift(-predikce_na_dni) > close_prices, 1, 0)
         data['Target'] = target_values[:len(data)]
@@ -138,17 +137,29 @@ if tlacitko:
         
         X_train, X_test, y_train, y_test = train_test_split(X_model, y_model, test_size=0.2, random_state=42)
         
-        model = RandomForestClassifier(n_estimators=150, random_state=42, max_depth=10)
-        model.fit(X_train, y_train)
+        # 6. AUTOMATICKÉ LADĚNÍ PARAMETRŮ (GridSearchCV)
+        # AI otestuje různé kombinace nastavení, aby vybrala tu nejpřesnější
+        param_grid = {
+            'max_depth':,
+            'learning_rate': [0.01, 0.05, 0.1],
+            'n_estimators': [100, 150]
+        }
+        
+        base_model = XGBClassifier(eval_metric='logloss', random_state=42)
+        grid_search = GridSearchCV(estimator=base_model, param_grid=param_grid, cv=3, scoring='accuracy', n_jobs=-1)
+        grid_search.fit(X_train, y_train)
+        
+        # Výběr nejlepšího modelu
+        model = grid_search.best_estimator_
         uprocenta = model.score(X_test, y_test) * 100
 
-        # 6. Zobrazení výsledků
+        # 7. Zobrazení výsledků
         st.subheader(f"Komplexní AI analýza pro {ticker}")
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric(label="Úspěšnost modelu (Accuracy)", value=f"{uprocenta:.2f} %")
+            st.metric(label="XGBoost Úspěšnost (Accuracy)", value=f"{uprocenta:.2f} %")
         with col2:
-            st.metric(label="Sentiment zpráv", value=f"{vysledny_sentiment:.2f}")
+            st.metric(label="Optimální hloubka modelu", value=f"{grid_search.best_params_['max_depth']} (z 7)", help="Dynamicky zvolená hloubka stromu pro nejvyšší stabilitu.")
         
         vysledek = int(model.predict(X_aktualni)[0])
         pravdepodobnost = model.predict_proba(X_aktualni)[0][vysledek] * 100
@@ -159,7 +170,7 @@ if tlacitko:
             else:
                 st.warning(f"🤖 AI PREDPOVÍDÁ: POKLES DO {predikce_na_dni} DNÍ ({pravdepodobnost:.1f} %)")
 
-        # 7. Vykreslení grafů
+        # 8. Vykreslení grafů
         fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_width=[0.25, 0.25, 0.5])
         
         fig.add_trace(go.Scatter(x=data.index, y=close_prices.loc[data.index], name='Cena', line=dict(color='#1f77b4', width=2)), row=1, col=1)
