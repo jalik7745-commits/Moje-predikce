@@ -26,7 +26,7 @@ st.write("Kombinace tržních indexů, technických indikátorů, finančního z
 # -----------------------------------------------------------------------------
 @st.cache_data(ttl=3600)  
 def stahni_trzni_data(ticker):
-    # Bezpečné stažení dat s vynuceným stažením jedné úrovně indexů
+    # Stahujeme data bez automatického řazení do multi-indexu
     data = yf.download(ticker, period="5y", interval="1d")
     sp500 = yf.download("^GSPC", period="5y", interval="1d")
     vix = yf.download("^VIX", period="5y", interval="1d")
@@ -35,7 +35,6 @@ def stahni_trzni_data(ticker):
 @st.cache_data(ttl=1800)  
 def ziskej_zpravy_marketwatch(ticker):
     """Stabilní metoda stahování zpráv přes RSS feed MarketWatch"""
-    # Pro nestandardní tickery (např. české) použije obecné zprávy, jinak konkrétní akcii
     if "." in ticker:
         url = "https://marketwatch.com"
     else:
@@ -54,7 +53,6 @@ def ziskej_zpravy_marketwatch(ticker):
     except Exception:
         pass
     
-    # Záložní zprávy, pokud by klíčové slovo nemělo žádný článek
     if not titulky:
         try:
             url_fallback = "https://marketwatch.com"
@@ -87,7 +85,7 @@ if tlacitko:
                 
             data = data.copy()
             
-            # Vyčištění MultiIndexu pokud ho yfinance vnutilo
+            # Vyčištění MultiIndexu z yfinance
             if isinstance(data.columns, pd.MultiIndex):
                 data.columns = data.columns.get_level_values(0)
             if isinstance(sp500.columns, pd.MultiIndex):
@@ -116,7 +114,7 @@ if tlacitko:
             
             ema12 = close_prices.ewm(span=12, adjust=False).mean()
             ema26 = close_prices.ewm(span=26, adjust=False).mean()
-            data['MACD'] = Pigeon = ema12 - ema26
+            data['MACD'] = ema12 - ema26
             data['MACD_Signal'] = data['MACD'].ewm(span=9, adjust=False).mean()
 
             # 3. FUNDAMENTÁLNÍ ANALÝZA
@@ -130,7 +128,7 @@ if tlacitko:
                 st.sidebar.write(f"**P/E Ratio:** {pe_ratio:.2f}" if pe_ratio else "**P/E Ratio:** N/A")
                 st.sidebar.write(f"**Zisková marže:** {profit_margin*100:.1f} %")
                 st.sidebar.write(f"**Růst tržeb:** {rev_growth*100:.1f} %")
-            except:
+            except Exception:
                 st.sidebar.write("Fundamenty staženy s omezením.")
                 pe_ratio, profit_margin, rev_growth = 0, 0, 0
 
@@ -161,7 +159,7 @@ if tlacitko:
                 st.error("Po očištění dat o prázdné hodnoty nezbyl žádný vzorek pro AI. Zkuste jinou akcii.")
                 st.stop()
 
-            # 5. STROJOVÉ UČENÍ (Ochrana proti 1D/2D chybám)
+            # 5. STROJOVÉ UČENÍ
             predikce_na_dni = 5
             target_values = np.where(close_prices.shift(-predikce_na_dni) > close_prices, 1, 0)
             data['Target'] = target_values[:len(data)]
@@ -169,7 +167,7 @@ if tlacitko:
             vlastnosti = ['SMA20', 'SMA50', 'RSI', 'MACD', 'SP500_Close', 'VIX_Close', 'PE', 'Margin', 'Sentiment']
             
             X = data[vlastnosti].to_numpy()
-            y = data['Target'].to_numpy().flatten() # Vynucení 1D pole
+            y = data['Target'].to_numpy().flatten()
             
             X_aktualni = X[-1].reshape(1, -1)
             X_model = X[:-predikce_na_dni]
@@ -190,8 +188,9 @@ if tlacitko:
             with col2:
                 st.metric(label="Kombinovaný sentiment zpráv", value=f"{vysledny_sentiment:.2f}")
             
-            vysledek = int(model.predict(X_aktualni)[0]) # [0] extrahuje čistý Python skalár
-            pravdepodobnosti = model.predict_proba(X_aktualni)[0] # Ochrana proti 2D poli v pravděpodobnosti
+            predikce_pole = model.predict(X_aktualni)
+            vysledek = int(predikce_pole[0])
+            pravdepodobnosti = model.predict_proba(X_aktualni)[0]
             pravdepodobnost_vysledku = pravdepodobnosti[vysledek] * 100
             
             with col3:
@@ -206,3 +205,5 @@ if tlacitko:
                                 subplot_titles=(f'Cena akcie a klouzavé průměry', 'RSI Indikátor', 'MACD (Hybnost trhu)'),
                                 row_width=[0.25, 0.25, 0.5])
 
+            fig.add_trace(go.Scatter(x=data.index, y=close_prices.loc[data.index], name='Cena akcie', line=dict(color='#1f77b4', width=2)), row=1, col=1)
+            fig.add_trace(go.Scatter(x=data.index, y=data['SMA20'], name='SMA 20', line=dict(color='#ff7f0e', dash='dash')), row=1, col=1)
