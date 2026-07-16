@@ -7,7 +7,7 @@ from plotly.subplots import make_subplots
 import requests
 import xml.etree.ElementTree as ET
 from xgboost import XGBClassifier
-from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.model_selection import GridSearchCV
 import nltk
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 
@@ -18,13 +18,12 @@ except LookupError:
     nltk.download('vader_lexicon', quiet=True)
 
 st.set_page_config(page_title="ULTIMATE AI Akciový Prediktor", layout="wide")
-st.title("🦅 ULTIMATE AI Analytická Platforma (XGBoost Engine)")
-st.write("Finanční predikce poháněná algoritmem XGBoost s automatickým laděním parametrů v reálném čase.")
+st.title("🦅 ULTIMATE AI Analytická Platforma & Backtester")
+st.write("Predikce algoritmem XGBoost doplněná o historickou simulaci vývoje kapitálu (Backtesting).")
 
-# --- CACHED POMOCNÉ FUNKCE (Zabezpečené proti MultiIndexu) ---
+# --- CACHED POMOCNÉ FUNKCE ---
 @st.cache_data(ttl=3600)  
 def stahni_data(ticker):
-    # Vynucení ploché struktury pomocí multi_level_index=False
     d = yf.download(ticker, period="5y", interval="1d", multi_level_index=False)
     s = yf.download("^GSPC", period="5y", interval="1d", multi_level_index=False)
     v = yf.download("^VIX", period="5y", interval="1d", multi_level_index=False)
@@ -49,43 +48,38 @@ def stahni_rss(ticker):
 
 # --- UŽIVATELSKÝ VSTUP ---
 ticker = st.text_input("Zadejte ticker akcie (např. AAPL, NVDA, TSLA):", "AAPL").upper().strip()
-tlacitko = st.button("Spustit ULTIMATE AI analýzu")
+tlacitko = st.button("Spustit ULTIMATE AI analýzu s Backtestingem")
 
 if tlacitko:
-    with st.spinner("Stahuji data a optimalizuji matematický model XGBoost..."):
+    with st.spinner("Stahuji data, optimalizuji XGBoost a simuluji historické obchody..."):
         # 1. Načtení dat
         raw_data, sp500, vix = stahni_data(ticker)
         
-        # Pojistka: Pokud by Yahoo selhalo, zkusíme stáhnout data bez vyrovnávací paměti
         if raw_data.empty:
             raw_data = yf.download(ticker, period="5y", interval="1d", multi_level_index=False)
         
         if raw_data.empty:
-            st.error(f"Nepodařilo se načíst data pro ticker '{ticker}'. Zkontrolujte správnost symbolu.")
+            st.error(f"Nepodařilo se načíst data pro ticker '{ticker}'. Zkontrolujte symbol.")
             st.stop()
             
         data = raw_data.copy()
         
-        # Vyčištění případného skrytého MultiIndexu z yfinance
         if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
         if isinstance(sp500.columns, pd.MultiIndex): sp500.columns = sp500.columns.get_level_values(0)
         if isinstance(vix.columns, pd.MultiIndex): vix.columns = vix.columns.get_level_values(0)
 
-        # Bezpečné vytažení Close cen jako 1D Series
         close_prices = pd.Series(data['Close'].to_numpy().flatten(), index=data.index)
-        
-        # Spojení indexů podle časové osy hlavní akcie
         data = data.loc[~data.index.duplicated(keep='first')]
         
         if not sp500.empty:
             data['SP500_Close'] = pd.Series(sp500['Close'].to_numpy().flatten(), index=sp500.index)
         else:
-            data['SP500_Close'] = data['Close'] # Záloha pokud index selže
+            data['SP500_Close'] = data['Close']
             
         if not vix.empty:
             data['VIX_Close'] = pd.Series(vix['Close'].to_numpy().flatten(), index=vix.index)
         else:
-            data['VIX_Close'] = 20.0 # Průměrná neutrální hodnota strachu
+            data['VIX_Close'] = 20.0
 
         # 2. Technické indikátory
         data['SMA20'] = close_prices.rolling(window=20).mean()
@@ -99,7 +93,7 @@ if tlacitko:
         data['MACD'] = close_prices.ewm(span=12, adjust=False).mean() - close_prices.ewm(span=26, adjust=False).mean()
         data['MACD_Signal'] = data['MACD'].ewm(span=9, adjust=False).mean()
 
-        # 3. Fundamentální data (Sidebar)
+        # 3. Fundamentální data
         st.sidebar.subheader("📋 Finanční zdraví")
         pe_ratio, profit_margin = 0.0, 0.0
         try:
@@ -131,30 +125,33 @@ if tlacitko:
             st.sidebar.write("Žádné zprávy nenalezeny.")
 
         data['Sentiment'] = vysledny_sentiment
-        
-        # Odstranění prázdných řádků vzniklých klouzavými průměry
         data = data.dropna()
 
         if data.empty:
-            st.error("Nedostatek historických dat pro sestavení indikátorů. Zkuste jinou akcii.")
+            st.error("Nedostatek dat po výpočtu indikátorů.")
             st.stop()
 
-        # 5. Pokročilá příprava dat pro XGBoost
+        # 5. Cílová proměnná a rozdělení podle času (Ochrana proti Data Leakage)
         predikce_na_dni = 5
         target_values = np.where(close_prices.shift(-predikce_na_dni) > close_prices, 1, 0)
         data['Target'] = target_values[:len(data)]
         
         vlastnosti = ['SMA20', 'SMA50', 'RSI', 'MACD', 'SP500_Close', 'VIX_Close', 'PE', 'Margin', 'Sentiment']
-        X = data[vlastnosti].to_numpy()
-        y = data['Target'].to_numpy().flatten()
         
-        X_aktualni = X[-1].reshape(1, -1)
-        X_model = X[:-predikce_na_dni]
-        y_model = y[:-predikce_na_dni]
+        # Rozdělení na trénovací (80 %) a testovací (20 %) část chronologicky
+        split_idx = int(len(data) * 0.8)
+        train_data = data.iloc[:split_idx]
+        test_data = data.iloc[split_idx:]
         
-        X_train, X_test, y_train, y_test = train_test_split(X_model, y_model, test_size=0.2, random_state=42)
+        X_train = train_data[vlastnosti].to_numpy()
+        y_train = train_data['Target'].to_numpy().flatten()
         
-        # 6. AUTOMATICKÉ LADĚNÍ PARAMETRŮ (GridSearchCV)
+        X_test = test_data[vlastnosti].to_numpy()
+        y_test = test_data['Target'].to_numpy().flatten()
+        
+        X_aktualni = data[vlastnosti].to_numpy()[-1].reshape(1, -1)
+
+        # 6. Trénování a optimalizace modelu XGBoost
         param_grid = {
             'max_depth': [3, 5, 7],
             'learning_rate': [0.01, 0.05, 0.1],
@@ -168,13 +165,52 @@ if tlacitko:
         model = grid_search.best_estimator_
         uprocenta = model.score(X_test, y_test) * 100
 
-        # 7. Zobrazení výsledků
+        # 7. SIMULACE OBCHODOVÁNÍ (Backtesting na posledních 20 % historických dat)
+        test_predictions = model.predict(X_test)
+        
+        kapital = 10000.0  # Počáteční kapitál v USD
+        pozice = 0.0       # Množství držených akcií
+        historie_kapitalu = []
+        historie_buy_hold = []
+        
+        pocatecni_cena = test_data['Close'].iloc[0]
+        mnozstvi_buy_hold = kapital / pocatecni_cena
+        
+        for i in range(len(test_data)):
+            aktualni_cena = test_data['Close'].iloc[i]
+            signal = test_predictions[i]
+            
+            # Strategie: Pokud AI předpovídá růst (1) a nemáme pozici -> nakoupíme za všechen kapitál
+            if signal == 1 and pozice == 0.0:
+                pozice = kapital / aktualni_cena
+                kapital = 0.0
+            # Pokud AI předpovídá pokles (0) a držíme akcie -> prodáme a držíme hotovost
+            elif signal == 0 and pozice > 0.0:
+                kapital = pozice * aktualni_cena
+                pozice = 0.0
+                
+            # Výpočet aktuální hodnoty portfolia v daný den
+            hodnota_portfolia = kapital if pozice == 0.0 else pozice * aktualni_cena
+            historie_kapitalu.append(hodnota_portfolia)
+            
+            # Srovnání se strategií "Kup a drž" (Buy & Hold)
+            historie_buy_hold.append(mnozstvi_buy_hold * aktualni_cena)
+            
+        test_data = test_data.copy()
+        test_data['AI_Strategie'] = historie_kapitalu
+        test_data['Buy_Hold_Strategie'] = historie_buy_hold
+        
+        final_ai_vybava = historie_kapitalu[-1]
+        final_bh_vybava = historie_buy_hold[-1]
+        ai_procenta = ((final_ai_vybava - 10000.0) / 10000.0) * 100
+
+        # 8. Zobrazení výsledků a metrik
         st.subheader(f"Komplexní AI analýza pro {ticker}")
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric(label="XGBoost Úspěšnost (Accuracy)", value=f"{uprocenta:.2f} %")
+            st.metric(label="Reálná úspěšnost na testovacích datech", value=f"{uprocenta:.2f} %", help="Přesnost modelu testovaná výhradně na datech, která model při učení nikdy neviděl.")
         with col2:
-            st.metric(label="Optimální hloubka modelu", value=f"{grid_search.best_params_['max_depth']} (z 7)", help="Dynamicky zvolená hloubka stromu pro nejvyšší stabilitu.")
+            st.metric(label="Finální hodnota AI účtu", value=f"${final_ai_vybava:,.2f}", delta=f"{ai_procenta:.1f} % zisku")
         
         vysledek = int(model.predict(X_aktualni)[0])
         pravdepodobnost = model.predict_proba(X_aktualni)[0][vysledek] * 100
@@ -185,19 +221,10 @@ if tlacitko:
             else:
                 st.warning(f"🤖 AI PREDPOVÍDÁ: POKLES DO {predikce_na_dni} DNÍ ({pravdepodobnost:.1f} %)")
 
-        # 8. Vykreslení grafů
-        fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_width=[0.25, 0.25, 0.5])
-        
-        fig.add_trace(go.Scatter(x=data.index, y=close_prices.loc[data.index], name='Cena', line=dict(color='#1f77b4', width=2)), row=1, col=1)
-        fig.add_trace(go.Scatter(x=data.index, y=data['SMA20'], name='SMA 20', line=dict(color='#ff7f0e', dash='dash')), row=1, col=1)
-        fig.add_trace(go.Scatter(x=data.index, y=data['SMA50'], name='SMA 50', line=dict(color='#2ca02c', dash='dot')), row=1, col=1)
-        
-        fig.add_trace(go.Scatter(x=data.index, y=data['RSI'], name='RSI', line=dict(color='#9467bd')), row=2, col=1)
-        fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
-        fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
-        
-        fig.add_trace(go.Scatter(x=data.index, y=data['MACD'], name='MACD', line=dict(color='#e377c2')), row=3, col=1)
-        fig.add_trace(go.Scatter(x=data.index, y=data['MACD_Signal'], name='Signál', line=dict(color='#7f7f7f', width=1)), row=3, col=1)
-        
-        fig.update_layout(height=800, template="plotly_white", showlegend=True)
-        st.plotly_chart(fig, use_container_width=True)
+        # Srovnávací přehled výkonnosti
+        st.write(f"**Výsledek simulace (počáteční vklad $10,000):** AI dosáhla koncového stavu **${final_ai_vybava:,.2f}**, zatímco pasivní strategie Kup a drž by vygenerovala **${final_bh_vybava:,.2f}**.")
+
+        # 9. Vykreslení grafů (Přidán graf simulace kapitálu)
+        fig = make_subplots(
+            rows=4, cols=1, shared_xaxes=True, vertical_spacing=0.04, 
+            subplot_titles=('Simulace kapitálu ($10,000 vklad) - AI vs. Pasivní držení', 'Cena akcie a klouzavé průměry', 'RSI Indikátor', 'MACD'),
