@@ -24,21 +24,23 @@ tlacitko = st.button("Spustit komplexní analýzu")
 if tlacitko:
     with st.spinner("Stahuji data z trhů, analýzu zpráv a trénuji model..."):
         try:
-            # 1. NAČTENÍ DAT Z BURZY (Akcie, S&P 500 a VIX index strachu)
-            data = yf.download(ticker, period="5y", interval="1d", multi_level_index=False)
-            sp500 = yf.download("^GSPC", period="5y", interval="1d", multi_level_index=False)
-            vix = yf.download("^VIX", period="5y", interval="1d", multi_level_index=False)
+            # 1. NAČTENÍ DAT Z BURZY (Zajištění ploché struktury pomocí group_by='ticker')
+            data = yf.download(ticker, period="5y", interval="1d", multi_level_index=False, group_by='ticker')
+            sp500 = yf.download("^GSPC", period="5y", interval="1d", multi_level_index=False, group_by='ticker')
+            vix = yf.download("^VIX", period="5y", interval="1d", multi_level_index=False, group_by='ticker')
             
             if data.empty or sp500.empty or vix.empty:
                 st.error("Nepodařilo se stáhnout kompletní tržní data.")
                 st.stop()
                 
             data = data.copy()
-            close_prices = pd.Series(data['Close'].values.flatten(), index=data.index)
+            
+            # Bezpečné vytvoření jednorozměrné Series pro Close ceny
+            close_prices = pd.Series(data['Close'].to_numpy().ravel(), index=data.index)
             
             # Propojení dat s tržními indexy podle data
-            data['SP500_Close'] = pd.Series(sp500['Close'].values.flatten(), index=sp500.index)
-            data['VIX_Close'] = pd.Series(vix['Close'].values.flatten(), index=vix.index)
+            data['SP500_Close'] = pd.Series(sp500['Close'].to_numpy().ravel(), index=sp500.index)
+            data['VIX_Close'] = pd.Series(vix['Close'].to_numpy().ravel(), index=vix.index)
 
             # 2. TECHNICKÁ ANALÝZA (Základní indikátory)
             data['SMA20'] = close_prices.rolling(window=20).mean()
@@ -77,7 +79,7 @@ if tlacitko:
             try:
                 zpravy = yf.Ticker(ticker).news
                 if zpravy:
-                    for zprava in zpravy[:5]:  # Vezmeme posledních 5 zpráv
+                    for zprava in zpravy[:5]:
                         titulek = zprava.get('title', '')
                         score = sia.polarity_scores(titulek)['compound']
                         vysledny_sentiment += score
@@ -97,9 +99,10 @@ if tlacitko:
             # 5. STROJOVÉ UČENÍ (Machine Learning)
             predikce_na_dni = 5
             target_values = np.where(close_prices.shift(-predikce_na_dni) > close_prices, 1, 0)
+            
+            # Oprava zarovnání délky cílového sloupce
             data['Target'] = target_values[:len(data)]
             
-            # Seznam všech vstupních informací pro přesnější rozhodování AI
             vlastnosti = ['SMA20', 'SMA50', 'RSI', 'MACD', 'SP500_Close', 'VIX_Close', 'PE', 'Margin', 'Sentiment']
             X = data[vlastnosti].values
             y = data['Target'].values
@@ -110,7 +113,7 @@ if tlacitko:
             
             X_train, X_test, y_train, y_test = train_test_split(X_model, y_model, test_size=0.2, random_state=42)
             
-            model = RandomForestClassifier(n_estimators=150, random_state=42) # Více stromů pro složitější data
+            model = RandomForestClassifier(n_estimators=150, random_state=42)
             model.fit(X_train, y_train)
             uprocenta = model.score(X_test, y_test) * 100
 
@@ -123,8 +126,8 @@ if tlacitko:
             with col2:
                 st.metric(label="Aktuální sentiment zpráv", value=f"{vysledny_sentiment:.2f}", help="Rozsah od -1 (nejhorší) do +1 (nejlepší)")
             
-            vysledek = int(model.predict(X_aktualni))
-            pravdepodobnosti = model.predict_proba(X_aktualni)
+            vysledek = int(model.predict(X_aktualni)[0]) # Opraveno na skalární hodnotu z pole
+            pravdepodobnosti = model.predict_proba(X_aktualni)[0] # Opraveno na indexaci nultého prvku
             pravdepodobnost_vysledku = pravdepodobnosti[vysledek] * 100
             
             with col3:
