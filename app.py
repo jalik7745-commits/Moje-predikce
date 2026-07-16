@@ -137,12 +137,11 @@ if tlacitko:
         
         X_train, X_test, y_train, y_test = train_test_split(X_model, y_model, test_size=0.2, random_state=42)
         
-        # 6. AUTOMATICKÉ LADĚNÍ PARAMETRŮ (GridSearchCV)
-        # AI otestuje různé kombinace nastavení, aby vybrala tu nejpřesnější
+        # 6. AUTOMATICKÉ LADĚNÍ PARAMETRŮ (GridSearchCV) - OPRAVENO
         param_grid = {
             'max_depth':,
             'learning_rate': [0.01, 0.05, 0.1],
-            'n_estimators': [100, 150]
+            'n_estimators': [50, 100, 150]
         }
         
         base_model = XGBClassifier(eval_metric='logloss', random_state=42)
