@@ -19,40 +19,60 @@ except LookupError:
 
 st.set_page_config(page_title="PRO AI Akciový Prediktor", layout="wide")
 st.title("🚀 Profesionální AI Analytická Platforma")
-st.write("Kombinace tržních indexů, technických indikátorů, finančního zdraví a stabilního RSS sentimentu zpráv.")
+st.write("Kombinace tržních indexů, technických indikátorů, finančního zdraví a stabilního sentimentu zpráv z MarketWatch.")
 
 # -----------------------------------------------------------------------------
-# POMOCNÉ FUNKCE S UKLÁDÁNÍM DO MEZIPAMĚTI (CACHING PRO VYSOKÝ VÝKON)
+# POMOCNÉ FUNKCE S UKLÁDÁNÍM DO MEZIPAMĚTI
 # -----------------------------------------------------------------------------
-@st.cache_data(ttl=3600)  # Data se udrží v paměti 1 hodinu, aplikace reaguje okamžitě
+@st.cache_data(ttl=3600)  
 def stahni_trzni_data(ticker):
-    data = yf.download(ticker, period="5y", interval="1d", multi_level_index=False, group_by='ticker')
-    sp500 = yf.download("^GSPC", period="5y", interval="1d", multi_level_index=False, group_by='ticker')
-    vix = yf.download("^VIX", period="5y", interval="1d", multi_level_index=False, group_by='ticker')
+    # Bezpečné stažení dat s vynuceným stažením jedné úrovně indexů
+    data = yf.download(ticker, period="5y", interval="1d")
+    sp500 = yf.download("^GSPC", period="5y", interval="1d")
+    vix = yf.download("^VIX", period="5y", interval="1d")
     return data, sp500, vix
 
-@st.cache_data(ttl=1800)  # Zprávy se obnovují každých 30 minut
-def ziskej_zpravy_rss(ticker):
-    """Stabilní metoda stahování zpráv přes oficiální RSS kanál Yahoo Finance"""
-    url = f"https://yahoo.com{ticker}"
-    hlavicky = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+@st.cache_data(ttl=1800)  
+def ziskej_zpravy_marketwatch(ticker):
+    """Stabilní metoda stahování zpráv přes RSS feed MarketWatch"""
+    # Pro nestandardní tickery (např. české) použije obecné zprávy, jinak konkrétní akcii
+    if "." in ticker:
+        url = "https://marketwatch.com"
+    else:
+        url = f"https://marketwatch.com{ticker}"
+        
+    hlavicky = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
     titulky = []
     try:
-        odpoved = requests.get(url, headers=hlavicky, timeout=5)
+        odpoved = requests.get(url, headers=hlavicky, timeout=7)
         if odpoved.status_code == 200:
             koren = ET.fromstring(odpoved.content)
-            for polozka in koren.findall('.//item')[:6]:  # Načte posledních 6 zpráv
+            for polozka in koren.findall('.//item')[:6]:  
                 titulek = polozka.find('title')
                 if titulek is not None and titulek.text:
-                    titulky.append(titulek.text)
+                    titulky.append(titulek.text.strip())
     except Exception:
         pass
+    
+    # Záložní zprávy, pokud by klíčové slovo nemělo žádný článek
+    if not titulky:
+        try:
+            url_fallback = "https://marketwatch.com"
+            odpoved = requests.get(url_fallback, headers=hlavicky, timeout=5)
+            koren = ET.fromstring(odpoved.content)
+            for polozka in koren.findall('.//item')[:5]:  
+                titulek = polozka.find('title')
+                if titulek is not None and titulek.text:
+                    titulky.append(titulek.text.strip())
+        except Exception:
+            pass
+            
     return titulky
 
 # -----------------------------------------------------------------------------
 # UŽIVATELSKÉ ROZHRANÍ
 # -----------------------------------------------------------------------------
-ticker = st.text_input("Zadejte ticker akcie (např. AAPL, AMZN, MSFT, ČEZ přes CEZ.PR):", "AAPL").upper().strip()
+ticker = st.text_input("Zadejte ticker akcie (např. AAPL, AMZN, MSFT):", "AAPL").upper().strip()
 tlacitko = st.button("Spustit komplexní PRO analýzu")
 
 if tlacitko:
@@ -66,13 +86,26 @@ if tlacitko:
                 st.stop()
                 
             data = data.copy()
-            close_prices = pd.Series(data['Close'].to_numpy().ravel(), index=data.index)
             
-            # Synchronizace indexů indexů s akcií podle data
-            data['SP500_Close'] = pd.Series(sp500['Close'].to_numpy().ravel(), index=sp500.index)
-            data['VIX_Close'] = pd.Series(vix['Close'].to_numpy().ravel(), index=vix.index)
+            # Vyčištění MultiIndexu pokud ho yfinance vnutilo
+            if isinstance(data.columns, pd.MultiIndex):
+                data.columns = data.columns.get_level_values(0)
+            if isinstance(sp500.columns, pd.MultiIndex):
+                sp500.columns = sp500.columns.get_level_values(0)
+            if isinstance(vix.columns, pd.MultiIndex):
+                vix.columns = vix.columns.get_level_values(0)
 
-            # 2. VÝPOČET POKROČILÝCH INDIKÁTORŮ
+            # Převod na čistá 1D pole (Ochrana proti chybám se skaláry)
+            close_prices = pd.Series(data['Close'].to_numpy().flatten(), index=data.index)
+            sp500_close = pd.Series(sp500['Close'].to_numpy().flatten(), index=sp500.index)
+            vix_close = pd.Series(vix['Close'].to_numpy().flatten(), index=vix.index)
+            
+            # Spojení do jedné tabulky podle datumu
+            data = data.loc[~data.index.duplicated(keep='first')]
+            data['SP500_Close'] = sp500_close
+            data['VIX_Close'] = vix_close
+
+            # 2. VÝPOČET INDIKÁTORŮ
             data['SMA20'] = close_prices.rolling(window=20).mean()
             data['SMA50'] = close_prices.rolling(window=50).mean()
             
@@ -81,10 +114,9 @@ if tlacitko:
             loss = (-delta.clip(upper=0)).rolling(window=14).mean()
             data['RSI'] = 100 - (100 / (1 + (gain / (loss + 1e-9))))
             
-            # Výpočet MACD (12-denní EMA - 26-denní EMA) a Signální linie
             ema12 = close_prices.ewm(span=12, adjust=False).mean()
             ema26 = close_prices.ewm(span=26, adjust=False).mean()
-            data['MACD'] = ema12 - ema26
+            data['MACD'] = Pigeon = ema12 - ema26
             data['MACD_Signal'] = data['MACD'].ewm(span=9, adjust=False).mean()
 
             # 3. FUNDAMENTÁLNÍ ANALÝZA
@@ -105,11 +137,11 @@ if tlacitko:
             data['PE'] = pe_ratio
             data['Margin'] = profit_margin
 
-            # 4. NOVÁ STABILNÍ ANALÝZA SENTIMENTU (RSS)
+            # 4. STABILNÍ ANALÝZA SENTIMENTU (MarketWatch)
             st.sidebar.subheader("📰 Nejnovější titulky zpráv")
             sia = SentimentIntensityAnalyzer()
             vysledny_sentiment = 0.0
-            titulky_zprav = ziskej_zpravy_rss(ticker)
+            titulky_zprav = ziskej_zpravy_marketwatch(ticker)
             
             if titulky_zprav:
                 for titulek in titulky_zprav:
@@ -119,19 +151,25 @@ if tlacitko:
                     st.sidebar.write(f"{smajlík} {titulek[:75]}...")
                 vysledny_sentiment /= len(titulky_zprav)
             else:
-                st.sidebar.write("Žádné aktuální zprávy nebyly nalezeny.")
+                st.sidebar.write("Žádné aktuální zprávy nebyly nalezeny (použit neutrální sentiment).")
+                vysledny_sentiment = 0.0
 
             data['Sentiment'] = vysledny_sentiment
             data = data.dropna()
 
-            # 5. STROJOVÉ UČENÍ (Machine Learning)
+            if data.empty:
+                st.error("Po očištění dat o prázdné hodnoty nezbyl žádný vzorek pro AI. Zkuste jinou akcii.")
+                st.stop()
+
+            # 5. STROJOVÉ UČENÍ (Ochrana proti 1D/2D chybám)
             predikce_na_dni = 5
             target_values = np.where(close_prices.shift(-predikce_na_dni) > close_prices, 1, 0)
             data['Target'] = target_values[:len(data)]
             
             vlastnosti = ['SMA20', 'SMA50', 'RSI', 'MACD', 'SP500_Close', 'VIX_Close', 'PE', 'Margin', 'Sentiment']
-            X = data[vlastnosti].values
-            y = data['Target'].values
+            
+            X = data[vlastnosti].to_numpy()
+            y = data['Target'].to_numpy().flatten() # Vynucení 1D pole
             
             X_aktualni = X[-1].reshape(1, -1)
             X_model = X[:-predikce_na_dni]
@@ -139,22 +177,22 @@ if tlacitko:
             
             X_train, X_test, y_train, y_test = train_test_split(X_model, y_model, test_size=0.2, random_state=42)
             
-            model = RandomForestClassifier(n_estimators=200, random_state=42, max_depth=10)
+            model = RandomForestClassifier(n_estimators=150, random_state=42, max_depth=10)
             model.fit(X_train, y_train)
             uprocenta = model.score(X_test, y_test) * 100
 
-            # 6. ZOBRAZENÍ METRIK VÝSLEDKŮ
+            # 6. ZOBRAZENÍ METRIK
             st.subheader(f"Komplexní AI analýza pro {ticker}")
             col1, col2, col3 = st.columns(3)
             
             with col1:
                 st.metric(label="Úspěšnost modelu (Accuracy)", value=f"{uprocenta:.2f} %")
             with col2:
-                st.metric(label="Kombinovaný sentiment zpráv", value=f"{vysledny_sentiment:.2f}", help="Od -1 (negativní) do +1 (pozitivní)")
+                st.metric(label="Kombinovaný sentiment zpráv", value=f"{vysledny_sentiment:.2f}")
             
-            vysledek = int(model.predict(X_aktualni))
-            pravdepodobnosti = model.predict_proba(X_aktualni)
-            pravdepodobnost_vysledku = pravdepodobnosti[0][vysledek] * 100
+            vysledek = int(model.predict(X_aktualni)[0]) # [0] extrahuje čistý Python skalár
+            pravdepodobnosti = model.predict_proba(X_aktualni)[0] # Ochrana proti 2D poli v pravděpodobnosti
+            pravdepodobnost_vysledku = pravdepodobnosti[vysledek] * 100
             
             with col3:
                 if vysledek == 1:
@@ -162,29 +200,9 @@ if tlacitko:
                 else:
                     st.warning(f"🤖 AI PREDPOVÍDÁ: POKLES DO {predikce_na_dni} DNÍ ({pravdepodobnost_vysledku:.1f} %)")
 
-            # 7. POKROČILÝ MULTI-GRAF (Cena + RSI + MACD)
+            # 7. MULTI-GRAF (Cena + RSI + MACD)
             fig = make_subplots(rows=3, cols=1, shared_xaxes=True, 
                                 vertical_spacing=0.05, 
                                 subplot_titles=(f'Cena akcie a klouzavé průměry', 'RSI Indikátor', 'MACD (Hybnost trhu)'),
                                 row_width=[0.25, 0.25, 0.5])
 
-            # Graf 1: Hlavní cena
-            fig.add_trace(go.Scatter(x=data.index, y=close_prices.loc[data.index], name='Cena akcie', line=dict(color='#1f77b4', width=2)), row=1, col=1)
-            fig.add_trace(go.Scatter(x=data.index, y=data['SMA20'], name='SMA 20 (Krátkodobý)', line=dict(color='#ff7f0e', dash='dash')), row=1, col=1)
-            fig.add_trace(go.Scatter(x=data.index, y=data['SMA50'], name='SMA 50 (Dlouhodobý)', line=dict(color='#2ca02c', dash='dot')), row=1, col=1)
-
-            # Graf 2: RSI
-            fig.add_trace(go.Scatter(x=data.index, y=data['RSI'], name='RSI', line=dict(color='#9467bd')), row=2, col=1)
-            fig.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="Překoupeno", row=2, col=1)
-            fig.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="Přeprodáno", row=2, col=1)
-
-            # Graf 3: MACD
-            fig.add_trace(go.Scatter(x=data.index, y=data['MACD'], name='MACD', line=dict(color='#e377c2')), row=3, col=1)
-            fig.add_trace(go.Scatter(x=data.index, y=data['MACD_Signal'], name='Signální linie', line=dict(color='#7f7f7f', width=1)), row=3, col=1)
-
-            fig.update_layout(height=800, template="plotly_white", showlegend=True,
-                              xaxis3_title="Datum", yaxis_title="Cena ($)", yaxis2_title="RSI", yaxis3_title="MACD")
-            st.plotly_chart(fig, use_container_width=True)
-            
-        except Exception as e:
-            st.error(f"Došlo k neočekávané chybě: {e}")
