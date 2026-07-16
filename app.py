@@ -48,11 +48,10 @@ if tlacitko:
         data['VIX_Close'] = pd.Series(vix['Close'].to_numpy().flatten(), index=vix.index)
 
         # 2. POKROČILÝ FEATURE ENGINEERING (Transformace pro zvýšení přesnosti)
-        # Klouzavé průměry
         data['SMA20'] = close_prices.rolling(window=20).mean()
         data['SMA50'] = close_prices.rolling(window=50).mean()
         
-        # NOVÉ: Procentuální vzdálenost od průměrů (odstraňuje surové ceny a ukazuje anomálie)
+        # Procentuální vzdálenost od průměrů
         data['Dist_SMA20'] = (close_prices - data['SMA20']) / data['SMA20']
         data['Dist_SMA50'] = (close_prices - data['SMA50']) / data['SMA50']
         
@@ -61,14 +60,14 @@ if tlacitko:
         gain = delta.clip(lower=0).rolling(window=14).mean()
         loss = (-delta.clip(upper=0)).rolling(window=14).mean()
         data['RSI'] = 100 - (100 / (1 + (gain / (loss + 1e-9))))
-        data['RSI_ROC'] = data['RSI'].diff(3) # Rychlost změny RSI
+        data['RSI_ROC'] = data['RSI'].diff(3)
         
-        # MACD a jeho histogram (rozdíl mezi MACD a signálem - klíčový indikátor otočení trendu)
+        # MACD a jeho histogram
         data['MACD'] = close_prices.ewm(span=12, adjust=False).mean() - close_prices.ewm(span=26, adjust=False).mean()
         data['MACD_Signal'] = data['MACD'].ewm(span=9, adjust=False).mean()
         data['MACD_Hist'] = data['MACD'] - data['MACD_Signal']
         
-        # NOVÉ: Bollingerova pásma (Vzdálenost ceny od horního/spodního pásma volatility)
+        # Bollingerova pásma
         std20 = close_prices.rolling(window=20).std()
         data['BB_High'] = data['SMA20'] + (std20 * 2)
         data['BB_Low'] = data['SMA20'] - (std20 * 2)
@@ -107,7 +106,7 @@ if tlacitko:
         target_values = np.where(close_prices.shift(-predikce_na_dni) > close_prices, 1, 0)
         data['Target'] = target_values[:len(data)]
         
-        # NOVÝ SEZNAM INDIKÁTORŮ: Odstranili jsme surovou cenu SMA a nahradili ji čistě matematickými poměry
+        # Seznam vlastností
         vlastnosti = ['Dist_SMA20', 'Dist_SMA50', 'RSI', 'RSI_ROC', 'MACD_Hist', 'BB_Position', 'SP500_Close', 'VIX_Close', 'ATR', 'Momentum', 'PE', 'Margin', 'Sentiment']
         X = data[vlastnosti].to_numpy()
         y = data['Target'].to_numpy().flatten()
@@ -123,7 +122,7 @@ if tlacitko:
         model = XGBClassifier(
             max_depth=3,            
             learning_rate=0.03,      
-            n_estimators=130, # Mírně navýšeno pro zpracování nových hlubších vztahů       
+            n_estimators=130,       
             subsample=0.8,          
             colsample_bytree=0.8,   
             eval_metric='logloss',
@@ -141,11 +140,13 @@ if tlacitko:
         with col1:
             st.metric(label="Ověřená přesnost směrového signálu (Accuracy)", value=f"{uprocenta:.2f} %", help="Úspěšnost modelu na posledních 60 dnech.")
         
+        # Bezpečné vytáhnutí čistého čísla
         predikce_raw = model.predict(X_aktualni)
         vysledek = int(predikce_raw.item())
         
+        # OPAVENO: Správná indexace 2D pole pravděpodobností [řádek 0][sloupec výsledek]
         pravdepodobnosti = model.predict_proba(X_aktualni)
-        pravdepodobnost = pravdepodobnosti[vysledek] * 100
+        pravdepodobnost = float(pravdepodobnosti[0][vysledek]) * 100
         
         with col2:
             if vysledek == 1:
