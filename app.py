@@ -138,7 +138,6 @@ if tlacitko:
         
         vlastnosti = ['SMA20', 'SMA50', 'RSI', 'MACD', 'SP500_Close', 'VIX_Close', 'PE', 'Margin', 'Sentiment']
         
-        # Rozdělení na trénovací (80 %) a testovací (20 %) část chronologicky
         split_idx = int(len(data) * 0.8)
         train_data = data.iloc[:split_idx]
         test_data = data.iloc[split_idx:]
@@ -153,7 +152,7 @@ if tlacitko:
 
         # 6. Trénování a optimalizace modelu XGBoost
         param_grid = {
-            'max_depth': [3, 5, 7],
+            'max_depth':,
             'learning_rate': [0.01, 0.05, 0.1],
             'n_estimators': [50, 100, 150]
         }
@@ -165,11 +164,11 @@ if tlacitko:
         model = grid_search.best_estimator_
         uprocenta = model.score(X_test, y_test) * 100
 
-        # 7. SIMULACE OBCHODOVÁNÍ (Backtesting na posledních 20 % historických dat)
+        # 7. SIMULACE OBCHODOVÁNÍ (Backtesting)
         test_predictions = model.predict(X_test)
         
-        kapital = 10000.0  # Počáteční kapitál v USD
-        pozice = 0.0       # Množství držených akcií
+        kapital = 10000.0  
+        pozice = 0.0       
         historie_kapitalu = []
         historie_buy_hold = []
         
@@ -180,20 +179,15 @@ if tlacitko:
             aktualni_cena = test_data['Close'].iloc[i]
             signal = test_predictions[i]
             
-            # Strategie: Pokud AI předpovídá růst (1) a nemáme pozici -> nakoupíme za všechen kapitál
             if signal == 1 and pozice == 0.0:
                 pozice = kapital / aktualni_cena
                 kapital = 0.0
-            # Pokud AI předpovídá pokles (0) a držíme akcie -> prodáme a držíme hotovost
             elif signal == 0 and pozice > 0.0:
                 kapital = pozice * aktualni_cena
                 pozice = 0.0
                 
-            # Výpočet aktuální hodnoty portfolia v daný den
             hodnota_portfolia = kapital if pozice == 0.0 else pozice * aktualni_cena
             historie_kapitalu.append(hodnota_portfolia)
-            
-            # Srovnání se strategií "Kup a drž" (Buy & Hold)
             historie_buy_hold.append(mnozstvi_buy_hold * aktualni_cena)
             
         test_data = test_data.copy()
@@ -208,11 +202,11 @@ if tlacitko:
         st.subheader(f"Komplexní AI analýza pro {ticker}")
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric(label="Reálná úspěšnost na testovacích datech", value=f"{uprocenta:.2f} %", help="Přesnost modelu testovaná výhradně na datech, která model při učení nikdy neviděl.")
+            st.metric(label="Reálná úspěšnost na testu", value=f"{uprocenta:.2f} %")
         with col2:
             st.metric(label="Finální hodnota AI účtu", value=f"${final_ai_vybava:,.2f}", delta=f"{ai_procenta:.1f} % zisku")
         
-        vysledek = int(model.predict(X_aktualni)[0])
+        vysledek = int(model.predict(X_aktualni))
         pravdepodobnost = model.predict_proba(X_aktualni)[0][vysledek] * 100
         
         with col3:
@@ -221,10 +215,19 @@ if tlacitko:
             else:
                 st.warning(f"🤖 AI PREDPOVÍDÁ: POKLES DO {predikce_na_dni} DNÍ ({pravdepodobnost:.1f} %)")
 
-        # Srovnávací přehled výkonnosti
         st.write(f"**Výsledek simulace (počáteční vklad $10,000):** AI dosáhla koncového stavu **${final_ai_vybava:,.2f}**, zatímco pasivní strategie Kup a drž by vygenerovala **${final_bh_vybava:,.2f}**.")
 
-        # 9. Vykreslení grafů (Přidán graf simulace kapitálu)
-        fig = make_subplots(
-            rows=4, cols=1, shared_xaxes=True, vertical_spacing=0.04, 
-            subplot_titles=('Simulace kapitálu ($10,000 vklad) - AI vs. Pasivní držení', 'Cena akcie a klouzavé průměry', 'RSI Indikátor', 'MACD'),
+        # 9. VYCRESLENÍ GRAFŮ (Rozděleno do dvou bloků kvůli bezchybné syntaxi)
+        st.subheader("📈 Vývoj simulovaného kapitálu")
+        fig_cap = go.Figure()
+        fig_cap.add_trace(go.Scatter(x=test_data.index, y=test_data['AI_Strategie'], name='AI Obchodní Engine', line=dict(color='#2ca02c', width=3)))
+        fig_cap.add_trace(go.Scatter(x=test_data.index, y=test_data['Buy_Hold_Strategie'], name='Pasivní Kup a drž', line=dict(color='#7f7f7f', width=2, dash='dot')))
+        fig_cap.update_layout(height=400, template="plotly_white", showlegend=True, xaxis_title="Datum", yaxis_title="Hodnota účtu ($)")
+        st.plotly_chart(fig_cap, use_container_width=True)
+
+        st.subheader("📊 Analýza trhu a technické indikátory")
+        fig_ind = make_subplots(
+            rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05,
+            subplot_titles=('Cena akcie a klouzavé průměry', 'RSI Indikátor', 'MACD')
+        )
+        
