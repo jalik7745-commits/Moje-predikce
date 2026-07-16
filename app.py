@@ -22,7 +22,7 @@ st.title("🚀 Profesionální AI Analytická Platforma")
 st.write("Kombinace tržních indexů, technických indikátorů, finančního zdraví a stabilního sentimentu zpráv z MarketWatch.")
 
 # -----------------------------------------------------------------------------
-# POMOCNÉ FUNKCE S UKLÁDÁNÍM DO MEZIPAMĚTI
+# DATOVÉ A ANALYTICKÉ FUNKCE
 # -----------------------------------------------------------------------------
 @st.cache_data(ttl=3600)  
 def stahni_trzni_data(ticker):
@@ -66,31 +66,54 @@ def ziskej_zpravy_marketwatch(ticker):
             
     return titulky
 
+def vykresli_grafy(data, close_prices):
+    """Bezpečné vykreslení grafů mimo hlavní try-except blok"""
+    fig = make_subplots(
+        rows=3, cols=1, shared_xaxes=True, 
+        vertical_spacing=0.05, 
+        subplot_titles=('Cena akcie a klouzavé průměry', 'RSI Indikátor', 'MACD (Hybnost trhu)'),
+        row_width=[0.25, 0.25, 0.5]
+    )
+
+    fig.add_trace(go.Scatter(x=data.index, y=close_prices.loc[data.index], name='Cena akcie', line=dict(color='#1f77b4', width=2)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=data.index, y=data['SMA20'], name='SMA 20', line=dict(color='#ff7f0e', dash='dash')), row=1, col=1)
+    fig.add_trace(go.Scatter(x=data.index, y=data['SMA50'], name='SMA 50', line=dict(color='#2ca02c', dash='dot')), row=1, col=1)
+
+    fig.add_trace(go.Scatter(x=data.index, y=data['RSI'], name='RSI', line=dict(color='#9467bd')), row=2, col=1)
+    fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
+    fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
+
+    fig.add_trace(go.Scatter(x=data.index, y=data['MACD'], name='MACD', line=dict(color='#e377c2')), row=3, col=1)
+    fig.add_trace(go.Scatter(x=data.index, y=data['MACD_Signal'], name='Signální linie', line=dict(color='#7f7f7f', width=1)), row=3, col=1)
+
+    fig.update_layout(height=800, template="plotly_white", showlegend=True, xaxis3_title="Datum")
+    st.plotly_chart(fig, use_container_width=True)
+
 # -----------------------------------------------------------------------------
-# UŽIVATELSKÉ ROZHRANÍ
+# HLAVNÍ LOGIKA APLIKACE
 # -----------------------------------------------------------------------------
 ticker = st.text_input("Zadejte ticker akcie (např. AAPL, AMZN, MSFT):", "AAPL").upper().strip()
 tlacitko = st.button("Spustit komplexní PRO analýzu")
 
 if tlacitko:
     with st.spinner("Provádím hloubkovou analýzu trhů a textových zpráv..."):
+        # Vlajky pro úspěšné dokončení fází
+        data_pripravena = False
+        
         try:
             # 1. NAČTENÍ TRŽNÍCH DAT
-            data, sp500, vix = stahni_trzni_data(ticker)
+            raw_data, sp500, vix = stahni_trzni_data(ticker)
             
-            if data.empty or sp500.empty or vix.empty:
+            if raw_data.empty or sp500.empty or vix.empty:
                 st.error("Nepodařilo se stáhnout kompletní tržní data. Ověřte správnost tickeru.")
                 st.stop()
                 
-            data = data.copy()
+            data = raw_data.copy()
             
             # Vyčištění MultiIndexu z yfinance
-            if isinstance(data.columns, pd.MultiIndex):
-                data.columns = data.columns.get_level_values(0)
-            if isinstance(sp500.columns, pd.MultiIndex):
-                sp500.columns = sp500.columns.get_level_values(0)
-            if isinstance(vix.columns, pd.MultiIndex):
-                vix.columns = vix.columns.get_level_values(0)
+            if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
+            if isinstance(sp500.columns, pd.MultiIndex): sp500.columns = sp500.columns.get_level_values(0)
+            if isinstance(vix.columns, pd.MultiIndex): vix.columns = vix.columns.get_level_values(0)
 
             # Převod na čistá 1D pole (Ochrana proti chybám se skaláry)
             close_prices = pd.Series(data['Close'].to_numpy().flatten(), index=data.index)
@@ -148,63 +171,41 @@ if tlacitko:
                     st.sidebar.write(f"{smajlík} {titulek[:75]}...")
                 vysledny_sentiment /= len(titulky_zprav)
             else:
-                st.sidebar.write("Žádné aktuální zprávy nebyly znalezeny (použit neutrální sentiment).")
+                st.sidebar.write("Žádné aktuální zprávy nebyly nalezeny (použit neutrální sentiment).")
                 vysledny_sentiment = 0.0
 
             data['Sentiment'] = vysledny_sentiment
             data = data.dropna()
 
             if data.empty:
-                st.error("Po očištění dat o prázdné hodnoty nezbyl žádný vzorek pro AI. Zkuste jinou akcii.")
+                st.error("Po očištění dat o prázdné hodnoty nezbyl žádný vzorek pro AI.")
                 st.stop()
+                
+            data_pripravena = True
 
-            # 5. STROJOVÉ UČENÍ
-            predikce_na_dni = 5
-            target_values = np.where(close_prices.shift(-predikce_na_dni) > close_prices, 1, 0)
-            data['Target'] = target_values[:len(data)]
-            
-            vlastnosti = ['SMA20', 'SMA50', 'RSI', 'MACD', 'SP500_Close', 'VIX_Close', 'PE', 'Margin', 'Sentiment']
-            
-            X = data[vlastnosti].to_numpy()
-            y = data['Target'].to_numpy().flatten()
-            
-            X_aktualni = X[-1].reshape(1, -1)
-            X_model = X[:-predikce_na_dni]
-            y_model = y[:-predikce_na_dni]
-            
-            X_train, X_test, y_train, y_test = train_test_split(X_model, y_model, test_size=0.2, random_state=42)
-            
-            model = RandomForestClassifier(n_estimators=150, random_state=42, max_depth=10)
-            model.fit(X_train, y_train)
-            uprocenta = model.score(X_test, y_test) * 100
+        except Exception as e:
+            st.error(f"Chyba při přípravě dat: {e}")
+            st.stop()
 
-            # 6. ZOBRAZENÍ METRIK
-            st.subheader(f"Komplexní AI analýza pro {ticker}")
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.metric(label="Úspěšnost modelu (Accuracy)", value=f"{uprocenta:.2f} %")
-            with col2:
-                st.metric(label="Kombinovaný sentiment zpráv", value=f"{vysledny_sentiment:.2f}")
-            
-            predikce_pole = model.predict(X_aktualni)
-            vysledek = int(predikce_pole[0])
-            pravdepodobnosti = model.predict_proba(X_aktualni)
-            pravdepodobnost_vysledku = pravdepodobnosti[0][vysledek] * 100
-            
-            with col3:
-                if vysledek == 1:
-                    st.success(f"🤖 AI PREDPOVÍDÁ: RŮST DO {predikce_na_dni} DNÍ ({pravdepodobnost_vysledku:.1f} %)")
-                else:
-                    st.warning(f"🤖 AI PREDPOVÍDÁ: POKLES DO {predikce_na_dni} DNÍ ({pravdepodobnost_vysledku:.1f} %)")
+        # 5. STROJOVÉ UČENÍ A ZOBRAZENÍ (Spustí se pouze pokud data prošla v pořádku)
+        if data_pripravena:
+            try:
+                predikce_na_dni = 5
+                target_values = np.where(close_prices.shift(-predikce_na_dni) > close_prices, 1, 0)
+                data['Target'] = target_values[:len(data)]
+                
+                vlastnosti = ['SMA20', 'SMA50', 'RSI', 'MACD', 'SP500_Close', 'VIX_Close', 'PE', 'Margin', 'Sentiment']
+                
+                X = data[vlastnosti].to_numpy()
+                y = data['Target'].to_numpy().flatten()
+                
+                X_aktualni = X[-1].reshape(1, -1)
+                X_model = X[:-predikce_na_dni]
+                y_model = y[:-predikce_na_dni]
+                
+                X_train, X_test, y_train, y_test = train_test_split(X_model, y_model, test_size=0.2, random_state=42)
+                
+                model = RandomForestClassifier(n_estimators=150, random_state=42, max_depth=10)
+                model.fit(X_train, y_train)
+                uprocenta = model.score(X_test, y_test) * 100
 
-            # 7. MULTI-GRAF (Cena + RSI + MACD)
-            fig = make_subplots(
-                rows=3, cols=1, shared_xaxes=True, 
-                vertical_spacing=0.05, 
-                subplot_titles=(f'Cena akcie a klouzavé průměry', 'RSI Indikátor', 'MACD (Hybnost trhu)'),
-                row_width=[0.25, 0.25, 0.5]
-            )
-
-            fig.add_trace(go.Scatter(x=data.index, y=close_prices.loc[data.index], name='Cena akcie', line=dict(color='#1f77b4', width=2)), row=1, col=1)
-            fig.add_trace(go.Scatter(x=data.index, y=data['SMA20'], name='SMA 20', line=dict(color='#ff7f0e', dash='dash')), row=1, col=1)
