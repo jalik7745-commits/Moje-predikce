@@ -26,7 +26,6 @@ st.write("Kombinace tržních indexů, technických indikátorů, finančního z
 # -----------------------------------------------------------------------------
 @st.cache_data(ttl=3600)  
 def stahni_trzni_data(ticker):
-    # Stahujeme data bez automatického řazení do multi-indexu
     data = yf.download(ticker, period="5y", interval="1d")
     sp500 = yf.download("^GSPC", period="5y", interval="1d")
     vix = yf.download("^VIX", period="5y", interval="1d")
@@ -149,7 +148,7 @@ if tlacitko:
                     st.sidebar.write(f"{smajlík} {titulek[:75]}...")
                 vysledny_sentiment /= len(titulky_zprav)
             else:
-                st.sidebar.write("Žádné aktuální zprávy nebyly nalezeny (použit neutrální sentiment).")
+                st.sidebar.write("Žádné aktuální zprávy nebyly znalezeny (použit neutrální sentiment).")
                 vysledny_sentiment = 0.0
 
             data['Sentiment'] = vysledny_sentiment
@@ -190,8 +189,8 @@ if tlacitko:
             
             predikce_pole = model.predict(X_aktualni)
             vysledek = int(predikce_pole[0])
-            pravdepodobnosti = model.predict_proba(X_aktualni)[0]
-            pravdepodobnost_vysledku = pravdepodobnosti[vysledek] * 100
+            pravdepodobnosti = model.predict_proba(X_aktualni)
+            pravdepodobnost_vysledku = pravdepodobnosti[0][vysledek] * 100
             
             with col3:
                 if vysledek == 1:
@@ -200,10 +199,12 @@ if tlacitko:
                     st.warning(f"🤖 AI PREDPOVÍDÁ: POKLES DO {predikce_na_dni} DNÍ ({pravdepodobnost_vysledku:.1f} %)")
 
             # 7. MULTI-GRAF (Cena + RSI + MACD)
-            fig = make_subplots(rows=3, cols=1, shared_xaxes=True, 
-                                vertical_spacing=0.05, 
-                                subplot_titles=(f'Cena akcie a klouzavé průměry', 'RSI Indikátor', 'MACD (Hybnost trhu)'),
-                                row_width=[0.25, 0.25, 0.5])
+            fig = make_subplots(
+                rows=3, cols=1, shared_xaxes=True, 
+                vertical_spacing=0.05, 
+                subplot_titles=(f'Cena akcie a klouzavé průměry', 'RSI Indikátor', 'MACD (Hybnost trhu)'),
+                row_width=[0.25, 0.25, 0.5]
+            )
 
             fig.add_trace(go.Scatter(x=data.index, y=close_prices.loc[data.index], name='Cena akcie', line=dict(color='#1f77b4', width=2)), row=1, col=1)
             fig.add_trace(go.Scatter(x=data.index, y=data['SMA20'], name='SMA 20', line=dict(color='#ff7f0e', dash='dash')), row=1, col=1)
