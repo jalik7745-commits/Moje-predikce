@@ -19,7 +19,7 @@ def stahni_cista_data(ticker):
     return d, s, v
 
 # --- UŽIVATELSKÝ VSTUP ---
-ticker = st.text_input("Zadejte ticker akcie (např. AAPL, NVDA, TSLA):", "AAPL").upper().strip()
+ticker = st.text_input("Zadejte ticker akcie (např. F, DVN, KMI, CL):", "AAPL").upper().strip()
 tlacitko = st.button("SPUSTIT MAXIMÁLNÍ PREDIKCI")
 
 if tlacitko:
