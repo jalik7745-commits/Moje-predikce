@@ -1,7 +1,4 @@
-Omlouvám se, do souboru app.py se na samotný konec (řádek 221) znovu propsal text z konverzace. To způsobilo pád aplikace na chybu SyntaxError kvůli českým uvozovkám.
-Tento problém jsem kompletně vyřešil. Zde je stoprocentně čistý kód, který končí přesně příkazem pro vykreslení grafu a neobsahuje žádné znaky navíc.
-## Kompletní opravený kód pro app.py
-Smažte prosím celý obsah souboru app.py na svém GitHubu a vložte tam tuto čistou verzi:
+
 
 import streamlit as stimport yfinance as yfimport pandas as pdimport numpy as npimport plotly.graph_objects as gofrom plotly.subplots import make_subplotsfrom xgboost import XGBClassifier
 
@@ -214,8 +211,5 @@ fig_ind.add_trace(go.Scatter(x=data.index, y=data['MACD'], name='MACD', line=dic
 fig_ind.add_trace(go.Scatter(x=data.index, y=data['MACD_Signal'], name='Signál', line=dict(color='#bcbd22', width=1)), row=3, col=1)
 fig_ind.update_layout(height=650, template="plotly_white", showlegend=True, xaxis3_title="Datum")
 st.plotly_chart(fig_ind, use_container_width=True)
-
-
-
 
 
