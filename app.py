@@ -1,10 +1,10 @@
-import streamlit as st
-import yfinance as yf
-import pandas as pd
-import numpy as np
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-from xgboost import XGBClassifier
+
+
+import streamlit as stimport yfinance as yfimport pandas as pdimport numpy as npimport plotly.graph_objects as gofrom plotly.subplots import make_subplotsfrom xgboost import XGBClassifier
+
+st.set_page_config(page_title="HIGH-PRECISION AI Engine", layout="wide")
+st.title("🦅 Nejpřesnější AI Prediktor (XGBoost High-Precision)")
+st.write("Veškerý výkon is alokován do pokročilé matematické transformation indikátorů pro dnešní den.")
 # --- ODLEHČENÉ NAČTÍTÁNÍ DAT ---
 @st.cache_data(ttl=1800)  def stahni_cista_data(ticker):
     d = yf.download(ticker, period="3y", interval="1d", multi_level_index=False)
