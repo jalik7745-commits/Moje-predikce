@@ -23,77 +23,63 @@ ticker = st.text_input("Zadejte ticker akcie (např. AAPL, NVDA, TSLA, F):", "AA
 tlacitko = st.button("SPUSTIT MAXIMÁLNÍ PREDIKCI")
 
 if tlacitko:
-    with st.spinner("AI optimalizuje matematické vztahy indikátorů pro dnešní den..."):
+    with st.spinner("AI optimalizuje matematické vztahy indikátorů..."):
         # 1. Načtení dat
         raw_data, sp500, vix = stahni_cista_data(ticker)
-        if raw_data.empty:
-            raw_data = yf.download(ticker, period="3y", interval="1d", multi_level_index=False)
         if raw_data.empty:
             st.error("Chyba při načítání tržních dat. Zkontrolujte ticker.")
             st.stop()
             
-        data = raw_data.copy()
-        
         # Srovnání sloupců (MultiIndex fix)
-        if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
+        if isinstance(raw_data.columns, pd.MultiIndex): raw_data.columns = raw_data.columns.get_level_values(0)
         if isinstance(sp500.columns, pd.MultiIndex): sp500.columns = sp500.columns.get_level_values(0)
         if isinstance(vix.columns, pd.MultiIndex): vix.columns = vix.columns.get_level_values(0)
 
-        # Spojení indexů podle časové osy hlavní akcie
-        data = data.loc[~data.index.duplicated(keep='first')]
-        
-        if not sp500.empty:
-            data['SP500_Close'] = pd.Series(sp500['Close'].to_numpy().flatten(), index=sp500.index)
-        else:
-            data['SP500_Close'] = data['Close']
-            
-        if not vix.empty:
-            data['VIX_Close'] = pd.Series(vix['Close'].to_numpy().flatten(), index=vix.index)
-        else:
-            data['VIX_Close'] = 20.0
+        # Očištění o duplicity v datech
+        df_akcie = raw_data.loc[~raw_data.index.duplicated(keep='first')].copy()
+        df_sp500 = sp500.loc[~sp500.index.duplicated(keep='first')].copy()
+        df_vix = vix.loc[~vix.index.duplicated(keep='first')].copy()
 
-        # Inteligentní vyplnění chybějících dní u indexů (svátky atd.)
+        # Spojení dat podle hlavní osy akcie
+        data = df_akcie.copy()
+        data['SP500_Close'] = df_sp500['Close']
+        data['VIX_Close'] = df_vix['Close']
+
+        # Vyplnění prázdných buněk
         data['SP500_Close'] = data['SP500_Close'].ffill().bfill()
         data['VIX_Close'] = data['VIX_Close'].ffill().bfill()
 
-        close_prices = pd.Series(data['Close'].to_numpy().flatten(), index=data.index)
-        high_prices = pd.Series(data['High'].to_numpy().flatten(), index=data.index)
-        low_prices = pd.Series(data['Low'].to_numpy().flatten(), index=data.index)
+        close_prices = data['Close']
+        high_prices = data['High']
+        low_prices = data['Low']
 
         # 2. POKROČILÝ FEATURE ENGINEERING
         data['SMA20'] = close_prices.rolling(window=20).mean()
         data['SMA50'] = close_prices.rolling(window=50).mean()
         
-        # Procentuální vzdálenost od průměrů
         data['Dist_SMA20'] = (close_prices - data['SMA20']) / data['SMA20']
         data['Dist_SMA50'] = (close_prices - data['SMA50']) / data['SMA50']
         
-        # RSI Výpočet a jeho hybnost
         delta = close_prices.diff()
         gain = delta.clip(lower=0).rolling(window=14).mean()
         loss = (-delta.clip(upper=0)).rolling(window=14).mean()
         data['RSI'] = 100 - (100 / (1 + (gain / (loss + 1e-9))))
         data['RSI_ROC'] = data['RSI'].diff(3)
         
-        # MACD a jeho histogram
         data['MACD'] = close_prices.ewm(span=12, adjust=False).mean() - close_prices.ewm(span=26, adjust=False).mean()
         data['MACD_Signal'] = data['MACD'].ewm(span=9, adjust=False).mean()
         data['MACD_Hist'] = data['MACD'] - data['MACD_Signal']
         
-        # Bollingerova pásma
         std20 = close_prices.rolling(window=20).std()
         data['BB_High'] = data['SMA20'] + (std20 * 2)
         data['BB_Low'] = data['SMA20'] - (std20 * 2)
         data['BB_Position'] = (close_prices - data['BB_Low']) / (data['BB_High'] - data['BB_Low'] + 1e-9)
 
-        # ATR (Volatilita)
         tr1 = high_prices - low_prices
         tr2 = abs(high_prices - close_prices.shift(1))
         tr3 = abs(low_prices - close_prices.shift(1))
         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
         data['ATR'] = tr.rolling(window=14).mean()
-        
-        # Tržní Momentum (Hybnost ceny za 10 dní)
         data['Momentum'] = close_prices.diff(10)
 
         # 3. Sidebar fundamenty
@@ -103,7 +89,7 @@ if tlacitko:
             info = yf.Ticker(ticker).info
             pe_ratio = info.get('trailingPE', 0) or 0
             profit_margin = info.get('profitMargins', 0) or 0
-            st.sidebar.write(f"**P/E Ratio:** {pe_ratio:.2f}" if pe_ratio else "**P/E Ratio:** N/A")
+            st.sidebar.write(f"**P/E Ratio:** {pe_ratio:.2f}" if pe_ratio else "P/E Ratio: N/A")
             st.sidebar.write(f"**Zisková marže:** {profit_margin*100:.1f} %")
         except:
             st.sidebar.write("Fundamentální data nedostupná.")
@@ -112,25 +98,19 @@ if tlacitko:
         data['Margin'] = profit_margin
         data['Sentiment'] = 0.0
 
-        # Bezpečné promazání pouze řádků ovlivněných SMA50 (prvních 50 dní)
+        # Odmažou se pouze první řádky
         data = data.dropna()
-
-        if data.empty or len(data) < 70:
-            st.error("Nedostatek historických dat pro analýzu po očištění indikátorů.")
-            st.stop()
 
         # 4. TRÉNOVÁNÍ STRATEGIE WALK-FORWARD
         predikce_na_dni = 5
-        target_values = np.where(close_prices.shift(-predikce_na_dni) > close_prices, 1, 0)
-        data['Target'] = target_values[:len(data)]
+        target_values = np.where(data['Close'].shift(-predikce_na_dni) > data['Close'], 1, 0)
+        data['Target'] = target_values
         
-        # Seznam vlastností
         vlastnosti = ['Dist_SMA20', 'Dist_SMA50', 'RSI', 'RSI_ROC', 'MACD_Hist', 'BB_Position', 'SP500_Close', 'VIX_Close', 'ATR', 'Momentum', 'PE', 'Margin', 'Sentiment']
         X = data[vlastnosti].to_numpy()
         y = data['Target'].to_numpy().flatten()
         
         X_aktualni = X[-1].reshape(1, -1)
-        
         X_model = X[:-predikce_na_dni]
         y_model = y[:-predikce_na_dni]
         
@@ -156,15 +136,13 @@ if tlacitko:
         
         col1, col2 = st.columns(2)
         with col1:
-            st.metric(label="Ověřená přesnost směrového signálu (Accuracy)", value=f"{uprocenta:.2f} %", help="Úspěšnost modelu na posledních 60 dnech.")
+            st.metric(label="Ověřená přesnost směrového signálu (Accuracy)", value=f"{uprocenta:.2f} %")
         
-        # Bezpečné vytáhnutí čistého čísla
         predikce_raw = model.predict(X_aktualni)
         vysledek = int(predikce_raw.item())
         
-        # OPRAVENO: Správná indexace 2D pole [0][vysledek] pro novou verzi XGBoost
         pravdepodobnosti = model.predict_proba(X_aktualni)
-        pravdepodobnost = float(pravdepodobnosti[0][vysledek]) * 100
+        pravdepodobnost = float(pravdepodobnosti[vysledek]) * 100
         
         with col2:
             if vysledek == 1:
@@ -179,7 +157,6 @@ if tlacitko:
         st.subheader("🧮 Optimalizovaná kalkulačka risku (Užší limity & Trailing SL)")
         st.write("Výpočty upravené pro ochranu kapitálu: Stop-Loss zúžen na 1.0x ATR, Take-Profit nastaven na 1.5x ATR.")
         
-        # Získání skalárních hodnot
         aktualni_cena_akcie = float(data['Close'].iloc[-1])
         aktualni_atr = float(data['ATR'].iloc[-1])
         
@@ -208,7 +185,22 @@ if tlacitko:
                 
         st.markdown("---")
 
-        # 6. TECHNICKÝ GRAF PRO KONTROLU
+        # 6. TECHNICKÝ GRAF PRO KONTROLU (S fixem časové osy na text)
         fig_ind = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, subplot_titles=('Cena akcie', 'RSI', 'MACD'))
         
-        fig_ind.add_trace(go.Scatter(x=data.index, y=data['Close'], name='Cena', line=dict(color='#1f77b4', width=2)), row=1, col=1)
+        # Převedení indexu na čistá textová data pro zamezení chyb formátu yfinance
+        casova_osa = data.index.strftime('%Y-%m-%d')
+        
+        fig_ind.add_trace(go.Scatter(x=casova_osa, y=data['Close'], name='Cena', line=dict(color='#1f77b4', width=2)), row=1, col=1)
+        fig_ind.add_trace(go.Scatter(x=casova_osa, y=data['SMA20'], name='SMA 20', line=dict(color='#ff7f0e', dash='dash')), row=1, col=1)
+        fig_ind.add_trace(go.Scatter(x=casova_osa, y=data['SMA50'], name='SMA 50', line=dict(color='#d62728', dash='dot')), row=1, col=1)
+        
+        fig_ind.add_trace(go.Scatter(x=casova_osa, y=data['RSI'], name='RSI', line=dict(color='#9467bd')), row=2, col=1)
+        fig_ind.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
+        fig_ind.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
+        
+        fig_ind.add_trace(go.Scatter(x=casova_osa, y=data['MACD'], name='MACD', line=dict(color='#e377c2')), row=3, col=1)
+        fig_ind.add_trace(go.Scatter(x=casova_osa, y=data['MACD_Signal'], name='Signál', line=dict(color='#bcbd22', width=1)), row=3, col=1)
+        
+        fig_ind.update_layout(height=650, template="plotly_white", showlegend=True, xaxis3_title="Datum")
+        st.plotly_chart(fig_ind, use_container_width=True)
