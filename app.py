@@ -8,7 +8,7 @@ from xgboost import XGBClassifier
 
 st.set_page_config(page_title="HIGH-PRECISION AI Engine", layout="wide")
 st.title("🦅 Nejpřesnější AI Prediktor (XGBoost High-Precision)")
-st.write("Veškerý výkon is alokován do pokročilé matematické transformation indikátorů pro dnešní den.")
+st.write("Veškerý výkon je alokován do pokročilé matematické transformace indikátorů pro dnešní den.")
 
 # --- ODLEHČENÉ NAČTÍTÁNÍ DAT ---
 @st.cache_data(ttl=1800)  
@@ -162,6 +162,7 @@ if tlacitko:
         predikce_raw = model.predict(X_aktualni)
         vysledek = int(predikce_raw.item())
         
+        # OPRAVENO: Správná indexace 2D pole [0][vysledek] pro novou verzi XGBoost
         pravdepodobnosti = model.predict_proba(X_aktualni)
         pravdepodobnost = float(pravdepodobnosti[0][vysledek]) * 100
         
@@ -178,7 +179,7 @@ if tlacitko:
         st.subheader("🧮 Optimalizovaná kalkulačka risku (Užší limity & Trailing SL)")
         st.write("Výpočty upravené pro ochranu kapitálu: Stop-Loss zúžen na 1.0x ATR, Take-Profit nastaven na 1.5x ATR.")
         
-        # Získání skalárních hodnot bez ohledu na vnitřní Series formát
+        # Získání skalárních hodnot
         aktualni_cena_akcie = float(data['Close'].iloc[-1])
         aktualni_atr = float(data['ATR'].iloc[-1])
         
@@ -211,4 +212,3 @@ if tlacitko:
         fig_ind = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, subplot_titles=('Cena akcie', 'RSI', 'MACD'))
         
         fig_ind.add_trace(go.Scatter(x=data.index, y=data['Close'], name='Cena', line=dict(color='#1f77b4', width=2)), row=1, col=1)
-        fig_ind.add_trace(go.Scatter(x=data.index, y=data['SMA20'], name='SMA 20', line=dict(color='#ff7f0e', dash='dash')), row=1, col=1)
