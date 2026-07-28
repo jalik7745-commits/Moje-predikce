@@ -5,7 +5,6 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from xgboost import XGBClassifier
-
 # --- ODLEHČENÉ NAČTÍTÁNÍ DAT ---
 @st.cache_data(ttl=1800)  def stahni_cista_data(ticker):
     d = yf.download(ticker, period="3y", interval="1d", multi_level_index=False)
