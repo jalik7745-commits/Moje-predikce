@@ -6,7 +6,6 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from xgboost import XGBClassifier
 
-
 st.set_page_config(page_title="HIGH-PRECISION AI Engine", layout="wide")
 st.title("🦅 Nejpřesnější AI Prediktor (XGBoost High-Precision)")
 st.write("Veškerý výkon is alokován do pokročilé matematické transformation indikátorů pro dnešní den.")
@@ -164,7 +163,7 @@ if tlacitko:
         vysledek = int(predikce_raw.item())
         
         pravdepodobnosti = model.predict_proba(X_aktualni)
-        pravdepodobnost = float(pravdepodobnosti[vysledek]) * 100
+        pravdepodobnost = float(pravdepodobnosti[0][vysledek]) * 100
         
         with col2:
             if vysledek == 1:
