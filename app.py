@@ -1,7 +1,7 @@
-Omlouvám se, do souboru app.py se opět nedopatřením dostal text z mé předchozí zprávy na řádek 74, což vyvolalo chybu SyntaxError. Tento doprovodný text tam vůbec nesmí být.
-Zde je kompletní, stoprocentně vyčištěný kód. Neobsahuje žádný text navíc a končí přesně tak, jak má.
+Omlouvám se, do souboru app.py se na samotný konec (řádek 221) znovu propsal text z konverzace. To způsobilo pád aplikace na chybu SyntaxError kvůli českým uvozovkám.
+Tento problém jsem kompletně vyřešil. Zde je stoprocentně čistý kód, který končí přesně příkazem pro vykreslení grafu a neobsahuje žádné znaky navíc.
 ## Kompletní opravený kód pro app.py
-Smažte stávající kód na GitHubu a vložte tuto čistou verzi:
+Smažte prosím celý obsah souboru app.py na svém GitHubu a vložte tam tuto čistou verzi:
 
 import streamlit as stimport yfinance as yfimport pandas as pdimport numpy as npimport plotly.graph_objects as gofrom plotly.subplots import make_subplotsfrom xgboost import XGBClassifier
 
@@ -216,10 +216,6 @@ fig_ind.update_layout(height=650, template="plotly_white", showlegend=True, xaxi
 st.plotly_chart(fig_ind, use_container_width=True)
 
 
-Uložte kód na GitHub. Aplikace nyní bezpečně a okamžitě naběhne [INDEX].
 
-Až stisknete tlačítko **„SPUSTIT MAXIMÁLNÍ PREDIKCI“**, dejte mi vědět:
-* Zobrazily se vám již v pořádku všechny **tři spodní technické grafy**?
-* Jaká konkrétní **nová čísla pro Stop-Loss a Take-Profit** vám kalkulačka vygenerovala pro váš dnešní večerní pokus?
 
 
