@@ -142,7 +142,8 @@ if tlacitko:
         vysledek = int(predikce_raw.item())
         
         pravdepodobnosti = model.predict_proba(X_aktualni)
-        pravdepodobnost = float(pravdepodobnosti[vysledek]) * 100
+        # OPRAVENO: Správná indexace dvourozměrného pole [0][vysledek] pro vytažení skaláru
+        pravdepodobnost = float(pravdepodobnosti[0][vysledek]) * 100
         
         with col2:
             if vysledek == 1:
@@ -185,10 +186,9 @@ if tlacitko:
                 
         st.markdown("---")
 
-        # 6. TECHNICKÝ GRAF PRO KONTROLU (S fixem časové osy na text)
+        # 6. TECHNICKÝ GRAF PRO KONTROLU
         fig_ind = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, subplot_titles=('Cena akcie', 'RSI', 'MACD'))
         
-        # Převedení indexu na čistá textová data pro zamezení chyb formátu yfinance
         casova_osa = data.index.strftime('%Y-%m-%d')
         
         fig_ind.add_trace(go.Scatter(x=casova_osa, y=data['Close'], name='Cena', line=dict(color='#1f77b4', width=2)), row=1, col=1)
