@@ -202,14 +202,3 @@ if tlacitko:
         
         fig_ind.add_trace(go.Scatter(x=data.index, y=data['Close'], name='Cena', line=dict(color='#1f77b4', width=2)), row=1, col=1)
         fig_ind.add_trace(go.Scatter(x=data.index, y=data['SMA20'], name='SMA 20', line=dict(color='#ff7f0e', dash='dash')), row=1, col=1)
-
-fig_ind.add_trace(go.Scatter(x=data.index, y=data['SMA50'], name='SMA 50', line=dict(color='#d62728', dash='dot')), row=1, col=1)
-fig_ind.add_trace(go.Scatter(x=data.index, y=data['RSI'], name='RSI', line=dict(color='#9467bd')), row=2, col=1)
-fig_ind.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
-fig_ind.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
-fig_ind.add_trace(go.Scatter(x=data.index, y=data['MACD'], name='MACD', line=dict(color='#e377c2')), row=3, col=1)
-fig_ind.add_trace(go.Scatter(x=data.index, y=data['MACD_Signal'], name='Signál', line=dict(color='#bcbd22', width=1)), row=3, col=1)
-fig_ind.update_layout(height=650, template="plotly_white", showlegend=True, xaxis3_title="Datum")
-st.plotly_chart(fig_ind, use_container_width=True)
-
-
