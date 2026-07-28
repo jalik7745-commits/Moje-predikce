@@ -19,7 +19,7 @@ def stahni_cista_data(ticker):
     return d, s, v
 
 # --- UŽIVATELSKÝ VSTUP ---
-ticker = st.text_input("Zadejte ticker akcie (např. F, DVN, KMI, SO, CL, NG=F):", "DVN").upper().strip()
+ticker = st.text_input("Zadejte ticker akcie (např. AAPL, NVDA, TSLA):", "AAPL").upper().strip()
 tlacitko = st.button("SPUSTIT MAXIMÁLNÍ PREDIKCI")
 
 if tlacitko:
@@ -144,7 +144,6 @@ if tlacitko:
         predikce_raw = model.predict(X_aktualni)
         vysledek = int(predikce_raw.item())
         
-        # OPRAVENO: Správná 2D indexace [0][vysledek] pro vytažení přesného skaláru z matice
         pravdepodobnosti = model.predict_proba(X_aktualni)
         pravdepodobnost = float(pravdepodobnosti[0][vysledek]) * 100
         
@@ -156,10 +155,10 @@ if tlacitko:
                 
         st.info(f"Tato predikce udává směr trendu na následujících **{predikce_na_dni} obchodních dní**.")
 
-        # --- KALKULAČKA ŘÍZENÍ RIZIKA ---
+        # --- NOVÉ: KALKULAČKA AKTIVNÍHO ŘÍZENÍ RIZIKA ---
         st.markdown("---")
-        st.subheader("🧮 Inteligentní kalkulačka obchodního rizika")
-        st.write("Výpočty na základě aktuální volatility trhu (ATR) a matematického poměru zisku k riziku RRR 1:2.")
+        st.subheader("🧮 Optimalizovaná kalkulačka risku (Užší limity & Trailing SL)")
+        st.write("Výpočty upravené pro ochranu kapitálu: Stop-Loss zúžen na 1.0x ATR, Take-Profit nastaven na 1.5x ATR.")
         
         aktualni_cena_akcie = float(close_prices.iloc[-1])
         aktualni_atr = float(data['ATR'].iloc[-1])
@@ -169,22 +168,23 @@ if tlacitko:
         with col_calc1:
             st.info(f"**Aktuální cena akcie:** ${aktualni_cena_akcie:,.2f}")
             st.write(f"Průměrný denní pohyb (ATR): ${aktualni_atr:.2f}")
+            st.warning("⚠️ **Pravidlo pro posunování risku:** Jakmile otevřený zisk dosáhne hodnoty jednoho celého ATR (cca +400 až +500 Kč), okamžitě posuňte Stop-Loss v platformě na vaši nákupní cenu. Tím zcela eliminujete riziko ztráty.")
         
         with col_calc2:
             if vysledek == 1:
-                stop_loss = aktualni_cena_akcie - (aktualni_atr * 1.5)
-                target_profit = aktualni_cena_akcie + (aktualni_atr * 3.0)
+                stop_loss = aktualni_cena_akcie - (aktualni_atr * 1.0)
+                target_profit = aktualni_cena_akcie + (aktualni_atr * 1.5)
                 
-                st.write("👉 **Doporučené nastavení pro nákup (LONG):**")
-                st.error(f"🛑 **Stop-Loss (Ukončení ztráty):** ${stop_loss:.2f}")
-                st.success(f"🎯 **Take-Profit (Výběr zisku):** ${target_profit:.2f}")
+                st.write("👉 **Zadání do platformy pro nákup (LONG):**")
+                st.error(f"🛑 **Stop-Loss (Užší pojistka):** ${stop_loss:.2f}")
+                st.success(f"🎯 **Take-Profit (Cílový zisk):** ${target_profit:.2f}")
             else:
-                stop_loss = aktualni_cena_akcie + (aktualni_atr * 1.5)
-                target_profit = aktualni_cena_akcie - (aktualni_atr * 3.0)
+                stop_loss = aktualni_cena_akcie + (aktualni_atr * 1.0)
+                target_profit = aktualni_cena_akcie - (aktualni_atr * 1.5)
                 
-                st.write("👉 **Doporučené nastavení pro spekulaci na pokles (SHORT):**")
-                st.error(f"🛑 **Stop-Loss (Ukončení ztráty):** ${stop_loss:.2f}")
-                st.success(f"🎯 **Take-Profit (Výběr zisku):** ${target_profit:.2f}")
+                st.write("👉 **Zadání do platformy pro spekulaci na pokles (SHORT):**")
+                st.error(f"🛑 **Stop-Loss (Užší pojistka):** ${stop_loss:.2f}")
+                st.success(f"🎯 **Take-Profit (Cílový zisk):** ${target_profit:.2f}")
                 
         st.markdown("---")
 
@@ -198,5 +198,3 @@ if tlacitko:
         fig_ind.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
         fig_ind.add_trace(go.Scatter(x=data.index, y=data['MACD'], name='MACD', line=dict(color='#e377c2')), row=3, col=1)
         fig_ind.add_trace(go.Scatter(x=data.index, y=data['MACD_Signal'], name='Signál', line=dict(color='#bcbd22', width=1)), row=3, col=1)
-        fig_ind.update_layout(height=650, template="plotly_white", showlegend=True, xaxis3_title="Datum")
-        st.plotly_chart(fig_ind, use_container_width=True)
