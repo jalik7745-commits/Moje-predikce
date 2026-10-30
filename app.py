@@ -11,12 +11,11 @@ from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 st.set_page_config(page_title="Inteligentní Trading Asistent", layout="wide")
 
 st.title("🤖 Ulti-XGBoost + Sentiment + S&P 500 + Fibonacci")
-st.write("Maximální přesnost s integrovaným digitálním watchlistem top 15 amerických akcií.")
+st.write("Optimalizovaná verze s dlouhou historií pro maximální přesnost.")
 
-# --- SIDEBAR: DIGITÁLNÍ WATCHLIST (TVŮJ PAPÍREK) & RIZIKO ---
+# --- SIDEBAR: DIGITÁLNÍ WATCHLIST & RIZIKO ---
 st.sidebar.header("📋 Tvůj digitální Watchlist")
 
-# Slovník se všemi 15 nejvhodnějšími akciemi (Název: Ticker)
 watchlist = {
     "Apple (AAPL)": "AAPL",
     "Microsoft (MSFT)": "MSFT",
@@ -35,7 +34,6 @@ watchlist = {
     "Caterpillar (CAT)": "CAT"
 }
 
-# Výběr akcie kliknutím v menu
 vybrany_nazev = st.sidebar.selectbox("Vyber akcii k analýze:", list(watchlist.keys()))
 ticker_akcie = watchlist[vybrany_nazev]
 
@@ -44,7 +42,6 @@ st.sidebar.header("💰 Nastavení XTB Účtu")
 kapital = st.sidebar.number_input("Zůstatek na tvém obchodním účtu ($):", min_value=100.0, value=2000.0, step=100.0)
 max_risk_procenta = st.sidebar.slider("Maximální povolená ztráta na jeden obchod (%):", min_value=0.5, max_value=5.0, value=1.0, step=0.5)
 
-# Zobrazení aktuálně vybrané akcie velkým písmem na hlavní stránce
 st.header(f"Aktuální analýza: {vybrany_nazev}")
 
 def ziskej_sentiment_zprav(ticker):
@@ -67,7 +64,8 @@ def ziskej_sentiment_zprav(ticker):
     except Exception:
         return 0.0
 
-def priprav_data_max_presnost(ticker, perioda="2y"):
+# ZVÝŠENO NA PERIODU 8 LET PRO ROBUSTNÍ UČENÍ AI
+def priprav_data_max_presnost(ticker, perioda="8y"):
     try:
         df = yf.download(ticker, period=perioda, multi_level_index=False, progress=False)
         spy = yf.download("^GSPC", period=perioda, multi_level_index=False, progress=False)
@@ -78,16 +76,19 @@ def priprav_data_max_presnost(ticker, perioda="2y"):
         df.columns = [str(col).strip() for col in df.columns]
         spy.columns = [str(col).strip() for col in spy.columns]
         
+        # Tržní kontext S&P 500
         df['SPY_Close'] = spy['Close']
         df['SPY_Rocni_Trend'] = spy['Close'].rolling(window=200).mean()
         df['Dist_SPY_Trend'] = (df['SPY_Close'] - df['SPY_Rocni_Trend']) / df['SPY_Close']
         
+        # Výpočet ATR (Volatilita)
         high_low = df['High'] - df['Low']
         high_close = np.abs(df['High'] - df['Close'].shift(1))
         low_close = np.abs(df['Low'] - df['Close'].shift(1))
         ranges = pd.concat([high_low, high_close, low_close], axis=1)
         df['ATR'] = ranges.max(axis=1).rolling(window=14).mean()
         
+        # Výpočet Fibonacciho hladin (50 dní)
         okno_fib = 50
         df['High_50'] = df['High'].rolling(window=okno_fib).max()
         df['Low_50'] = df['Low'].rolling(window=okno_fib).min()
@@ -97,16 +98,19 @@ def priprav_data_max_presnost(ticker, perioda="2y"):
         df['Fib_500'] = df['High_50'] - (df['Fib_Range'] * 0.500)
         df['Fib_618'] = df['High_50'] - (df['Fib_Range'] * 0.618)
         
+        # Vzdálenosti od hladin
         df['Dist_Fib_382'] = (df['Close'] - df['Fib_382']) / df['Close']
         df['Dist_Fib_500'] = (df['Close'] - df['Fib_500']) / df['Close']
         df['Dist_Fib_618'] = (df['Close'] - df['Fib_618']) / df['Close']
         df['ATR_Percent'] = df['ATR'] / df['Close']
         
+        # RSI
         delta = df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
         df['RSI'] = 100 - (100 / (1 + (gain / loss)))
         
+        # Zakomponování sentimentu
         zivy_sentiment = ziskej_sentiment_zprav(ticker)
         df['Sentiment'] = np.where(df['Close'] > df['Close'].shift(1), zivy_sentiment * 0.8 + 0.1, zivy_sentiment * 0.8 - 0.1)
         df.loc[df.index[-1], 'Sentiment'] = zivy_sentiment
@@ -117,8 +121,8 @@ def priprav_data_max_presnost(ticker, perioda="2y"):
     except Exception as e:
         return None, 0.0
 
-# Spuštění analýzy pro vybranou akcii z bočního menu
-data, aktualni_sentiment = priprav_data_max_presnost(ticker_akcie, perioda="2y")
+# Spuštění analýzy
+data, aktualni_sentiment = priprav_data_max_presnost(ticker_akcie, perioda="8y")
 
 if data is not None and not data.empty:
     features = ['Dist_Fib_382', 'Dist_Fib_500', 'Dist_Fib_618', 'RSI', 'ATR_Percent', 'Dist_SPY_Trend', 'Sentiment']
@@ -131,7 +135,16 @@ if data is not None and not data.empty:
 
     X_train, X_test, y_train, y_test = train_test_split(X_historie, y_historie, test_size=0.2, shuffle=False)
 
-    model = XGBClassifier(n_estimators=100, max_depth=4, learning_rate=0.05, random_state=42, eval_metric='logloss')
+    # VYLADĚNÉ HYPERPARAMETRY MODELU PRO DLOUHÁ DATA
+    model = XGBClassifier(
+        n_estimators=150,       # Více stromů pro hlubší data
+        max_depth=5,            # O něco hlubší stromy pro zachycení komplexnějších vazeb
+        learning_rate=0.03,     # Pomalejší učení zamezí unáhleným závěrům AI
+        subsample=0.8,          # Ochrana proti přetrénování
+        colsample_bytree=0.8,
+        random_state=42, 
+        eval_metric='logloss'
+    )
     model.fit(X_train, y_train)
 
     y_pred_test = model.predict(X_test)
@@ -176,7 +189,6 @@ if data is not None and not data.empty:
     else:
         sentiment_text = "NEUTRÁLNÍ 😐"
 
-    # Zobrazení výsledků na hlavní ploše
     st.subheader(f"📋 Pokyny pro ruční zadání do XTB ({ticker_akcie} CFD)")
     
     col1, col2, col3 = st.columns(3)
@@ -192,7 +204,6 @@ if data is not None and not data.empty:
     st.success(f"🛡️ **MANAGEMENT RIZIKA:** Při tomto obchodu riskuješ maximálně **{max_dolarovy_risk:.2f} USD**.")
     st.warning(f"👉 **CO ZADAT V XTB (xStation):** Otevři příkaz, nastav objem na **{doporuceny_objem_loty:.2f} Lotů**, zadej **SL: {stop_loss:.2f}** a **TP: {take_profit:.2f}**.")
 
-    # --- GRAF ---
     fig, ax = plt.subplots(figsize=(10, 3.5))
     posledni_dny = data.tail(60)
     ax.plot(posledni_dny.index, posledni_dny['Close'], color='black', label=f'Cena {ticker_akcie}', linewidth=2)
