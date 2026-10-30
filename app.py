@@ -8,81 +8,53 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
-st.set_page_config(page_title="Inteligentní Trading Asistent", layout="wide")
+st.set_page_config(page_title="Inteligentní Skener Trhu", layout="wide")
 
-st.title("🛡️ Risk-Aware XGBoost Trading Asistent")
-st.write("Model zaměřený na zachycení silných trendů s vysokým poměrem zisku k riziku (RRR 1:2) a Fibonacciho konfluencí.")
+st.title("🛡️ Automatický XGBoost Skener & Asistent")
+st.write("Live přehled celého trhu na jedno kliknutí s automatickým vyhledáním signálů.")
 
-# --- SIDEBAR: WATCHLIST & RIZIKO ---
-st.sidebar.header("📋 Tvůj digitální Watchlist")
-
+# --- SEZNAM OBCHODOVANÝCH AKCIÍ ---
 watchlist = {
-    "Apple (AAPL)": "AAPL",
-    "Microsoft (MSFT)": "MSFT",
-    "NVIDIA (NVDA)": "NVDA",
-    "Alphabet / Google (GOOGL)": "GOOGL",
-    "Amazon (AMZN)": "AMZN",
-    "Meta Platforms (META)": "META",
-    "Tesla (TSLA)": "TSLA",
-    "Broadcom (AVGO)": "AVGO",
-    "Advanced Micro Devices (AMD)": "AMD",
-    "Netflix (NFLX)": "NFLX",
-    "Walmart (WMT)": "WMT",
-    "JPMorgan Chase (JPM)": "JPM",
-    "Visa (V)": "V",
-    "Eli Lilly (LLY)": "LLY",
-    "Caterpillar (CAT)": "CAT"
+    "Apple": "AAPL", "Microsoft": "MSFT", "NVIDIA": "NVDA", "Google": "GOOGL",
+    "Amazon": "AMZN", "Meta": "META", "Tesla": "TSLA", "Broadcom": "AVGO",
+    "AMD": "AMD", "Netflix": "NFLX", "Walmart": "WMT", "JPMorgan": "JPM",
+    "Visa": "V", "Eli Lilly": "LLY", "Caterpillar": "CAT"
 }
 
-vybrany_nazev = st.sidebar.selectbox("Vyber akcii k ANALÝZE:", list(watchlist.keys()))
-ticker_akcie = watchlist[vybrany_nazev]
-
-st.sidebar.markdown("---")
+# --- SIDEBAR CONFIG ---
 st.sidebar.header("💰 Nastavení XTB Účtu")
-kapital = st.sidebar.number_input("Zůstatek na tvém obchodním účtu ($):", min_value=100.0, value=2000.0, step=100.0)
-max_risk_procenta = st.sidebar.slider("Maximální povolená ztráta na jeden obchod (%):", min_value=0.5, max_value=5.0, value=1.0, step=0.5)
-
-st.header(f"Aktuální analýza: {vybrany_nazev}")
+kapital = st.sidebar.number_input("Zůstatek na účtu ($):", min_value=100.0, value=2000.0, step=100.0)
+max_risk_procenta = st.sidebar.slider("Maximální risk na obchod (%):", min_value=0.5, max_value=5.0, value=1.0, step=0.5)
 
 def ziskej_sentiment_zprav(ticker):
     try:
         ticker_obj = yf.Ticker(ticker)
         zpravy = ticker_obj.news
-        if not zpravy:
-            return 0.0
+        if not zpravy: return 0.0
         analyzer = SentimentIntensityAnalyzer()
-        skore_sentimentu = []
-        for zprava in zpravy[:5]:
-            titulek = zprava.get('title', '')
-            vysledek = analyzer.polarity_scores(titulek)
-            skore_sentimentu.append(vysledek['compound'])
-        return float(np.mean(skore_sentimentu)) if skore_sentimentu else 0.0
-    except Exception:
-        return 0.0
+        skore = [analyzer.polarity_scores(z.get('title', ''))['compound'] for z in zpravy[:3]]
+        return float(np.mean(skore)) if skore else 0.0
+    except Exception: return 0.0
 
-def priprav_data_trend(ticker, perioda="8y"):
+@st.cache_data(ttl=3600) # Uloží data na 1 hodinu do paměti pro bleskové načítání
+def analyzuj_akcii(ticker):
     try:
-        df = yf.download(ticker, period=perioda, multi_level_index=False, progress=False)
-        spy = yf.download("^GSPC", period=perioda, multi_level_index=False, progress=False)
-        
-        if df.empty or spy.empty:
-            return None, 0.0
+        df = yf.download(ticker, period="3y", multi_level_index=False, progress=False)
+        spy = yf.download("^GSPC", period="3y", multi_level_index=False, progress=False)
+        if df.empty or spy.empty: return None
         
         df.columns = [str(col).strip() for col in df.columns]
         spy.columns = [str(col).strip() for col in spy.columns]
         
-        # S&P 500 Kontext
         df['SPY_Close'] = spy['Close']
         df['SPY_Rocni_Trend'] = spy['Close'].rolling(window=200).mean()
         df['Dist_SPY_Trend'] = (df['SPY_Close'] - df['SPY_Rocni_Trend']) / df['SPY_Close']
         
-        # Volatilita (ATR)
         high_low = df['High'] - df['Low']
         high_close = np.abs(df['High'] - df['Close'].shift(1))
         low_close = np.abs(df['Low'] - df['Close'].shift(1))
         df['ATR'] = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1).rolling(window=14).mean()
         
-        # Fibonacci (50 dní)
         okno_fib = 50
         df['High_50'] = df['High'].rolling(window=okno_fib).max()
         df['Low_50'] = df['Low'].rolling(window=okno_fib).min()
@@ -94,101 +66,103 @@ def priprav_data_trend(ticker, perioda="8y"):
         df['Dist_Fib_382'] = (df['Close'] - df['Fib_382']) / df['Close']
         df['ATR_Percent'] = df['ATR'] / df['Close']
         
-        # RSI
         delta = df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
         df['RSI'] = 100 - (100 / (1 + (gain / loss)))
         
-        # Sentiment
-        zivy_sentiment = ziskej_sentiment_zprav(ticker)
-        df['Sentiment'] = np.where(df['Close'] > df['Close'].shift(1), zivy_sentiment * 0.8 + 0.1, zivy_sentiment * 0.8 - 0.1)
-        df.loc[df.index[-1], 'Sentiment'] = zivy_sentiment
+        z_sent = ziskej_sentiment_zprav(ticker)
+        df['Sentiment'] = np.where(df['Close'] > df['Close'].shift(1), z_sent * 0.8 + 0.1, z_sent * 0.8 - 0.1)
+        df.loc[df.index[-1], 'Sentiment'] = z_sent
         
-        # CÍL (TARGET): Hledáme silný růstový impuls v příštích 5 dnech
         budouci_max = df['High'].shift(-5).rolling(window=5).max()
         df['Target'] = (budouci_max > (df['Close'] + (df['ATR'] * 1.5))).astype(int)
-        
         df.dropna(inplace=True)
-        return df, zivy_sentiment
-    except Exception:
-        return None, 0.0
+        
+        features = ['Dist_Fib_382', 'Dist_Fib_618', 'RSI', 'ATR_Percent', 'Dist_SPY_Trend', 'Sentiment']
+        X = df[features]
+        y = df['Target']
+        
+        X_dnes = X.tail(1)
+        X_hist = X.iloc[:-1]
+        y_hist = y.iloc[:-1]
+        
+        X_train, X_test, y_train, y_test = train_test_split(X_hist, y_hist, test_size=0.2, shuffle=False)
+        model = XGBClassifier(n_estimators=100, max_depth=4, learning_rate=0.05, random_state=42, eval_metric='logloss')
+        model.fit(X_train, y_train)
+        
+        acc = accuracy_score(y_test, model.predict(X_test)) * 100
+        prob = float(pd.DataFrame(model.predict_proba(X_dnes)).iloc[0, 1]) * 100
+        
+        return {
+            'Cena': float(df['Close'].iloc[-1]), 'ATR': float(df['ATR'].iloc[-1]),
+            'Fib_618': float(df['Fib_618'].iloc[-1]), 'Fib_382': float(df['Fib_382'].iloc[-1]),
+            'High_50': float(df['High_50'].iloc[-1]), 'Low_50': float(df['Low_50'].iloc[-1]),
+            'Presnost': acc, 'Pravdepodobnost': prob, 'Data完整': df
+        }
+    except Exception: return None
 
-data, aktualni_sentiment = priprav_data_trend(ticker_akcie, perioda="8y")
+# --- HLAVNÍ BĚH SCANNERU ---
+st.subheader("📊 Živý přehled celého trhu")
+vysledky_list = []
 
-if data is not None and not data.empty:
-    features = ['Dist_Fib_382', 'Dist_Fib_618', 'RSI', 'ATR_Percent', 'Dist_SPY_Trend', 'Sentiment']
-    X = data[features]
-    y = data['Target']
+with st.spinner("🔄 Algoritmus skenuje kompletní trh a zprávy..."):
+    for jmeno, tkr in watchlist.items():
+        res = analyzuj_akcii(tkr)
+        if res:
+            stav = "🟩 NÁKUP" if res['Pravdepodobnost'] >= 60.0 else "⬜ ČEKEJ"
+            vysledky_list.append({
+                "Akcie": jmeno, "Ticker": tkr, "Aktuální cena ($)": f"{res['Cena']:.2f}",
+                "Pravděpodobnost růstu": res['Pravdepodobnost'], "Historická přesnost": res['Presnost'], "Doporučený příkaz": stav
+            })
 
-    X_dnes = X.tail(1)
-    X_historie = X.iloc[:-1]
-    y_historie = y.iloc[:-1]
+df_watchlist = pd.DataFrame(vysledky_list)
+# Seřadíme tabulku tak, aby nákupní signály byly hned nahoře
+df_watchlist = df_watchlist.sort_values(by=["Doporučený příkaz", "Pravděpodobnost růstu"], ascending=[False, False])
 
-    X_train, X_test, y_train, y_test = train_test_split(X_historie, y_historie, test_size=0.2, shuffle=False)
+# Formátování zobrazení procent
+df_watchlist["Pravděpodobnost růstu"] = df_watchlist["Pravděpodobnost růstu"].map("{:.1f} %".format)
+df_watchlist["Historická přesnost"] = df_watchlist["Historická přesnost"].map("{:.1f} %".format)
 
-    model = XGBClassifier(n_estimators=150, max_depth=4, learning_rate=0.03, subsample=0.8, random_state=42, eval_metric='logloss')
-    model.fit(X_train, y_train)
+# Vykreslení interaktivní tabulky
+st.dataframe(df_watchlist, use_container_width=True, hide_index=True)
 
-    y_pred_test = model.predict(X_test)
-    historicka_presnost = accuracy_score(y_test, y_pred_test) * 100
+st.markdown("---")
+# --- DETAILNÍ POKYNY POD TABULKOU ---
+st.subheader("🔍 Detailní instrukce a graf vybrané akcie")
+vybrana_akcie_box = st.selectbox("Pokud chceš vidět graf a přesné Loty pro XTB, zvol akcii zde:", list(watchlist.keys()))
+ticker_vybrane = watchlist[vybrana_akcie_box]
 
-    raw_pravdepodobnost = model.predict_proba(X_dnes)
-    pravdepodobnost_rustu = float(pd.DataFrame(raw_pravdepodobnost).iloc[0, 1]) * 100
-
-    aktualni_cena = float(data['Close'].iloc[-1])
-    atr = float(data['ATR'].iloc[-1])
+res_detail = analyzuj_akcii(ticker_vybrane)
+if res_detail:
+    cena_d = res_detail['Cena']
+    atr_d = res_detail['ATR']
     
-    # --- ASYMETRICKÉ ŘÍZENÍ PŘÍKAZU (RRR 1:2) ---
-    stop_loss = aktualni_cena - (atr * 1.0)    
-    take_profit = aktualni_cena + (atr * 2.0)  
-    
-    max_dolarovy_risk = kapital * (max_risk_procenta / 100.0)
-    vzdalenost_sl = abs(aktualni_cena - stop_loss)
-    doporuceny_objem_loty = max_dolarovy_risk / vzdalenost_sl
+    sl_d = cena_d - (atr_d * 1.0)
+    tp_d = cena_d + (atr_d * 2.0)
+    if res_detail['Pravdepodobnost'] < 60.0:
+        # Pokud je stav čekej, SL/TP dáme cvičně, ale příkaz zablokujeme
+        sl_d = res_detail['Fib_618'] - atr_d
+        tp_d = res_detail['High_50'] - (atr_d * 0.5)
+        if sl_d >= cena_d: sl_d = cena_d - (atr_d * 1.5)
 
-    if pravdepodobnost_rustu >= 60.0:
-        smer_text = "NÁKUP (BUY) 📈"
-        barva_boxu = st.success
-        pokyn_text = f"👉 **CO ZADAT V XTB:** Otevři BUY příkaz, nastav objem na **{doporuceny_objem_loty:.2f} Lotů**, zadej **SL: {stop_loss:.2f}** a **TP: {take_profit:.2f}**."
+    risk_d = kapital * (max_risk_procenta / 100.0)
+    loty_d = risk_d / abs(cena_d - sl_d)
+
+    if res_detail['Pravdepodobnost'] >= 60.0:
+        st.success(f"🔥 **SIGNÁL AKTIVNÍ:** V XTB otevři **BUY** příkaz na **{vybrana_akcie_box}**.")
+        st.warning(f"👉 **NASTAVENÍ PRO XTB:** Objem: **{loty_d:.2f} Lotů** | STOP-LOSS: **{sl_d:.2f} USD** | TAKE-PROFIT: **{tp_d:.2f} USD**")
     else:
-        smer_text = "ČEKEJ (ŽÁDNÝ SIGNÁL) ⏳"
-        barva_boxu = st.info
-        pokyn_text = "❌ **Doporučení:** Dnes chybí silná shoda indikátorů. Do obchodu nevstupuj a počkej na jasnější trend."
+        st.info("⏳ pro tuto akcii dnes platí pokyn **ČEKEJ**. Neriskuj peníze a vyčkej na zelený signál v tabulce výše.")
 
-    st.subheader(f"📋 Pokyny pro ruční zadání do XTB ({ticker_akcie} CFD)")
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric(label="Doporučený příkaz", value=smer_text)
-        st.metric(label="Aktuální cena", value=f"{aktualni_cena:.2f} USD")
-    with col2:
-        st.metric(label="Pravděpodobnost silného růstu", value=f"{pravdepodobnost_rustu:.1f} %")
-        st.metric(label="Denní volatilita (ATR)", value=f"{atr:.2f} USD")
-    with col3:
-        st.metric(label="Přesnost záchytu trendů", value=f"{historicka_presnost:.1f} %", 
-                  help="Úspěšnost modelu při správném označení začátku silného pohybu v minulosti.")
-
-    barva_boxu(f"🛡️ **MANAGEMENT RIZIKA:** Pokud systém vygeneruje signál, riskuješ maximálně **{max_dolarovy_risk:.2f} USD**.")
-    
-    st.markdown(f"<div style='background-color:#f0f2f6;padding:15px;border-radius:5px;color:black;'>{pokyn_text}</div>", unsafe_allow_html=True)
-
-    # --- GRAF S FIBONACCIHO LINIEI ZPĚT NA OBRAZOVCE ---
-    fig, ax = plt.subplots(figsize=(10, 4))
-    posledni_dny = data.tail(60)
-    ax.plot(posledni_dny.index, posledni_dny['Close'], color='black', label=f'Cena {ticker_akcie}', linewidth=2)
-    
-    # Navrácení linií Fibonacciho posloupnosti
-    ax.plot(posledni_dny.index, posledni_dny['Fib_618'], color='purple', linestyle='--', alpha=0.5, label='Fib 61.8% (Podlaha)')
-    ax.plot(posledni_dny.index, posledni_dny['Fib_382'], color='orange', linestyle='--', alpha=0.5, label='Fib 38.2% (Strop)')
-    
-    # Hladiny příkazu
-    ax.axhline(y=stop_loss, color='red', linestyle=':', linewidth=2, label=f'SL ({stop_loss:.2f})')
-    ax.axhline(y=take_profit, color='green', linestyle=':', linewidth=2, label=f'TP ({take_profit:.2f})')
-    
-    ax.set_title(f"Technická mapa trhu pro {ticker_akcie}")
+    # Graf
+    fig, ax = plt.subplots(figsize=(10, 3.5))
+    p_dny = res_detail['Data完整'].tail(60)
+    ax.plot(p_dny.index, p_dny['Close'], color='black', label='Cena', linewidth=2)
+    ax.plot(p_dny.index, p_dny['Fib_618'], color='purple', linestyle='--', alpha=0.4, label='Fib 61.8%')
+    ax.plot(p_dny.index, p_dny['Fib_382'], color='orange', linestyle='--', alpha=0.4, label='Fib 38.2%')
+    ax.axhline(y=sl_d, color='red', linestyle=':', label='SL')
+    ax.axhline(y=tp_d, color='green', linestyle=':', label='TP')
     ax.legend(loc="upper left")
-    ax.grid(True, alpha=0.3)
+    ax.grid(True, alpha=0.2)
     st.pyplot(fig)
-else:
-    st.error("Nepodařilo se načíst data.")
