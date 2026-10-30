@@ -13,7 +13,7 @@ st.title("🤖 XGBoost + Fibonacci + ATR Trading Asistent")
 st.write("Predikce a výpočet hladin pro americké CFD kontrakty.")
 
 # Výběr akcie přímo ve Streamlitu
-ticker_akcie = st.text_input("Zadejte ticker americké akcie (např. NVDA, AAPL, TSLA):", "NVDA").upper()
+ticker_akcie = st.text_input("Zadejte ticker americké akcie (např. F, DVN, KMI, SO, NLY, ADM, ASML, NG, CL, HG, KC):", "F").upper()
 
 def priprav_data_s_atr(ticker, perioda="2y"):
     try:
