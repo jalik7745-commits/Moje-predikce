@@ -50,7 +50,7 @@ def priprav_data_max_presnost(ticker, perioda="2y"):
         
         if df.empty or spy.empty:
             st.error("Nepodařilo se stáhnout tržní data.")
-            return None
+            return None, 0.0
         
         df.columns = [str(col).strip() for col in df.columns]
         spy.columns = [str(col).strip() for col in spy.columns]
@@ -89,11 +89,9 @@ def priprav_data_max_presnost(ticker, perioda="2y"):
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
         df['RSI'] = 100 - (100 / (1 + (gain / loss)))
         
-        # !!! KLIČOVÝ PRVEK: Zakomponování živého a historického sentimentu zpráv !!!
+        # Zakomponování sentimentu zpráv
         zivy_sentiment = ziskej_sentiment_zprav(ticker)
-        # Pro historii vytvoříme mírně kolísavý sentiment navázaný na úspěch ceny, abychom model naučili reagovat
         df['Sentiment'] = np.where(df['Close'] > df['Close'].shift(1), zivy_sentiment * 0.8 + 0.1, zivy_sentiment * 0.8 - 0.1)
-        # Poslednímu dni dáme 100% přesný aktuální stažený sentiment ze zpráv
         df.loc[df.index[-1], 'Sentiment'] = zivy_sentiment
         
         df['Target'] = (df['Close'].shift(-1) > df['Close']).astype(int)
@@ -107,7 +105,6 @@ def priprav_data_max_presnost(ticker, perioda="2y"):
 data, aktualni_sentiment = priprav_data_max_presnost(ticker_akcie, perioda="2y")
 
 if data is not None and not data.empty:
-    # Nový příznak 'Sentiment' je zaveden do rozhodování AI!
     features = ['Dist_Fib_382', 'Dist_Fib_500', 'Dist_Fib_618', 'RSI', 'ATR_Percent', 'Dist_SPY_Trend', 'Sentiment']
     X = data[features]
     y = data['Target']
@@ -124,11 +121,13 @@ if data is not None and not data.empty:
     y_pred_test = model.predict(X_test)
     historicka_presnost = accuracy_score(y_test, y_pred_test) * 100
 
+    # === OPRAVENO: Stoprocentně bezpečné vytažení hodnot bez ohledu na formát pole ===
     raw_predikce = model.predict(X_dnes)
-    predikce = int(np.atleast_1d(raw_predikce))
+    predikce = int(pd.Series(raw_predikce).iloc[0])
     
-    vysledek_pravdepodobnosti = model.predict_proba(X_dnes)
-    jistota = float(np.atleast_2d(raw_pravdepodobnost)[predikce]) * 100
+    raw_pravdepodobnost = model.predict_proba(X_dnes)
+    jistota = float(pd.DataFrame(raw_pravdepodobnost).iloc[0, predikce]) * 100
+    # ===============================================================================
 
     aktualni_cena = float(data['Close'].iloc[-1])
     atr = float(data['ATR'].iloc[-1])
@@ -158,11 +157,11 @@ if data is not None and not data.empty:
 
     # Slovní interpretace sentimentu zpráv
     if aktualni_sentiment > 0.1:
-        sentiment_text = "POZITIVNÍ 👍 (Zprávy táhnou cenu nahoru)"
+        sentiment_text = "POZITIVNÍ 👍"
     elif aktualni_sentiment < -0.1:
-        sentiment_text = "NEGATIVNÍ 👎 (Zprávy trh zneklidňují)"
+        sentiment_text = "NEGATIVNÍ 👎"
     else:
-        sentiment_text = "NEUTRÁLNÍ 😐 (Klidné období bez šoků)"
+        sentiment_text = "NEUTRÁLNÍ 😐"
 
     # Zobrazení výsledků
     st.subheader(f"📋 Pokyny pro ruční zadání do XTB ({ticker_akcie} CFD)")
@@ -173,7 +172,7 @@ if data is not None and not data.empty:
         st.metric(label="Aktuální cena", value=f"{aktualni_cena:.2f} USD")
     with col2:
         st.metric(label="Jistota pro tento obchod", value=f"{jistota:.2f} %")
-        st.metric(label="Aktuální nálada zpráv (Sentiment)", value=sentiment_text)
+        st.metric(label="Nálada zpráv (Sentiment)", value=sentiment_text)
     with col3:
         st.metric(label="Historická přesnost modelu", value=f"{historicka_presnost:.1f} %")
 
