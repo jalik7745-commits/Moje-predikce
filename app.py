@@ -11,27 +11,51 @@ from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 st.set_page_config(page_title="Inteligentní Trading Asistent", layout="wide")
 
 st.title("🤖 Ulti-XGBoost + Sentiment + S&P 500 + Fibonacci")
-st.write("Maximální možná přesnost predikce díky spojení technické analýzy, tržního indexu a zpráv.")
+st.write("Maximální přesnost s integrovaným digitálním watchlistem top 15 amerických akcií.")
 
-# --- SIDEBAR: ŘÍZENÍ RIZIKA ---
+# --- SIDEBAR: DIGITÁLNÍ WATCHLIST (TVŮJ PAPÍREK) & RIZIKO ---
+st.sidebar.header("📋 Tvůj digitální Watchlist")
+
+# Slovník se všemi 15 nejvhodnějšími akciemi (Název: Ticker)
+watchlist = {
+    "Apple (AAPL)": "AAPL",
+    "Microsoft (MSFT)": "MSFT",
+    "NVIDIA (NVDA)": "NVDA",
+    "Alphabet / Google (GOOGL)": "GOOGL",
+    "Amazon (AMZN)": "AMZN",
+    "Meta Platforms (META)": "META",
+    "Tesla (TSLA)": "TSLA",
+    "Broadcom (AVGO)": "AVGO",
+    "Advanced Micro Devices (AMD)": "AMD",
+    "Netflix (NFLX)": "NFLX",
+    "Walmart (WMT)": "WMT",
+    "JPMorgan Chase (JPM)": "JPM",
+    "Visa (V)": "V",
+    "Eli Lilly (LLY)": "LLY",
+    "Caterpillar (CAT)": "CAT"
+}
+
+# Výběr akcie kliknutím v menu
+vybrany_nazev = st.sidebar.selectbox("Vyber akcii k analýze:", list(watchlist.keys()))
+ticker_akcie = watchlist[vybrany_nazev]
+
+st.sidebar.markdown("---")
 st.sidebar.header("💰 Nastavení XTB Účtu")
 kapital = st.sidebar.number_input("Zůstatek na tvém obchodním účtu ($):", min_value=100.0, value=2000.0, step=100.0)
 max_risk_procenta = st.sidebar.slider("Maximální povolená ztráta na jeden obchod (%):", min_value=0.5, max_value=5.0, value=1.0, step=0.5)
 
-ticker_akcie = st.text_input("Zadejte ticker americké akcie (např. NVDA, AAPL, TSLA):", "NVDA").upper()
+# Zobrazení aktuálně vybrané akcie velkým písmem na hlavní stránce
+st.header(f"Aktuální analýza: {vybrany_nazev}")
 
 def ziskej_sentiment_zprav(ticker):
-    """Stáhne nejnovější zprávy o akcii a spočítá celkovou náladu (sentiment)."""
     try:
         ticker_obj = yf.Ticker(ticker)
         zpravy = ticker_obj.news
         if not zpravy:
-            return 0.0 # Neutrální, pokud zprávy chybí
+            return 0.0
         
         analyzer = SentimentIntensityAnalyzer()
         skore_sentimentu = []
-        
-        # Analyzujeme titulky prvních 5 nejčerstvějších zpráv
         for zprava in zpravy[:5]:
             titulek = zprava.get('title', '')
             vysledek = analyzer.polarity_scores(titulek)
@@ -45,29 +69,25 @@ def ziskej_sentiment_zprav(ticker):
 
 def priprav_data_max_presnost(ticker, perioda="2y"):
     try:
-        df = yf.download(ticker, period=perioda, multi_level_index=False)
-        spy = yf.download("^GSPC", period=perioda, multi_level_index=False)
+        df = yf.download(ticker, period=perioda, multi_level_index=False, progress=False)
+        spy = yf.download("^GSPC", period=perioda, multi_level_index=False, progress=False)
         
         if df.empty or spy.empty:
-            st.error("Nepodařilo se stáhnout tržní data.")
             return None, 0.0
         
         df.columns = [str(col).strip() for col in df.columns]
         spy.columns = [str(col).strip() for col in spy.columns]
         
-        # Tržní kontext S&P 500
         df['SPY_Close'] = spy['Close']
         df['SPY_Rocni_Trend'] = spy['Close'].rolling(window=200).mean()
         df['Dist_SPY_Trend'] = (df['SPY_Close'] - df['SPY_Rocni_Trend']) / df['SPY_Close']
         
-        # Výpočet ATR (Volatilita)
         high_low = df['High'] - df['Low']
         high_close = np.abs(df['High'] - df['Close'].shift(1))
         low_close = np.abs(df['Low'] - df['Close'].shift(1))
         ranges = pd.concat([high_low, high_close, low_close], axis=1)
         df['ATR'] = ranges.max(axis=1).rolling(window=14).mean()
         
-        # Výpočet Fibonacciho hladin (50 dní)
         okno_fib = 50
         df['High_50'] = df['High'].rolling(window=okno_fib).max()
         df['Low_50'] = df['Low'].rolling(window=okno_fib).min()
@@ -77,19 +97,16 @@ def priprav_data_max_presnost(ticker, perioda="2y"):
         df['Fib_500'] = df['High_50'] - (df['Fib_Range'] * 0.500)
         df['Fib_618'] = df['High_50'] - (df['Fib_Range'] * 0.618)
         
-        # Vzdálenosti od hladin
         df['Dist_Fib_382'] = (df['Close'] - df['Fib_382']) / df['Close']
         df['Dist_Fib_500'] = (df['Close'] - df['Fib_500']) / df['Close']
         df['Dist_Fib_618'] = (df['Close'] - df['Fib_618']) / df['Close']
         df['ATR_Percent'] = df['ATR'] / df['Close']
         
-        # RSI
         delta = df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
         df['RSI'] = 100 - (100 / (1 + (gain / loss)))
         
-        # Zakomponování sentimentu zpráv
         zivy_sentiment = ziskej_sentiment_zprav(ticker)
         df['Sentiment'] = np.where(df['Close'] > df['Close'].shift(1), zivy_sentiment * 0.8 + 0.1, zivy_sentiment * 0.8 - 0.1)
         df.loc[df.index[-1], 'Sentiment'] = zivy_sentiment
@@ -98,10 +115,9 @@ def priprav_data_max_presnost(ticker, perioda="2y"):
         df.dropna(inplace=True)
         return df, zivy_sentiment
     except Exception as e:
-        st.error(f"Chyba při zpracování dat: {e}")
         return None, 0.0
 
-# Spuštění analýzy
+# Spuštění analýzy pro vybranou akcii z bočního menu
 data, aktualni_sentiment = priprav_data_max_presnost(ticker_akcie, perioda="2y")
 
 if data is not None and not data.empty:
@@ -121,13 +137,11 @@ if data is not None and not data.empty:
     y_pred_test = model.predict(X_test)
     historicka_presnost = accuracy_score(y_test, y_pred_test) * 100
 
-    # === OPRAVENO: Stoprocentně bezpečné vytažení hodnot bez ohledu na formát pole ===
     raw_predikce = model.predict(X_dnes)
     predikce = int(pd.Series(raw_predikce).iloc[0])
     
     raw_pravdepodobnost = model.predict_proba(X_dnes)
     jistota = float(pd.DataFrame(raw_pravdepodobnost).iloc[0, predikce]) * 100
-    # ===============================================================================
 
     aktualni_cena = float(data['Close'].iloc[-1])
     atr = float(data['ATR'].iloc[-1])
@@ -155,7 +169,6 @@ if data is not None and not data.empty:
     vzdalenost_sl = abs(aktualni_cena - stop_loss)
     doporuceny_objem_loty = max_dolarovy_risk / vzdalenost_sl
 
-    # Slovní interpretace sentimentu zpráv
     if aktualni_sentiment > 0.1:
         sentiment_text = "POZITIVNÍ 👍"
     elif aktualni_sentiment < -0.1:
@@ -163,7 +176,7 @@ if data is not None and not data.empty:
     else:
         sentiment_text = "NEUTRÁLNÍ 😐"
 
-    # Zobrazení výsledků
+    # Zobrazení výsledků na hlavní ploše
     st.subheader(f"📋 Pokyny pro ruční zadání do XTB ({ticker_akcie} CFD)")
     
     col1, col2, col3 = st.columns(3)
@@ -180,7 +193,7 @@ if data is not None and not data.empty:
     st.warning(f"👉 **CO ZADAT V XTB (xStation):** Otevři příkaz, nastav objem na **{doporuceny_objem_loty:.2f} Lotů**, zadej **SL: {stop_loss:.2f}** a **TP: {take_profit:.2f}**.")
 
     # --- GRAF ---
-    fig, ax = plt.subplots(figsize=(10, 4))
+    fig, ax = plt.subplots(figsize=(10, 3.5))
     posledni_dny = data.tail(60)
     ax.plot(posledni_dny.index, posledni_dny['Close'], color='black', label=f'Cena {ticker_akcie}', linewidth=2)
     ax.plot(posledni_dny.index, posledni_dny['Fib_618'], color='purple', linestyle='--', alpha=0.5, label='Fib 61.8%')
@@ -191,3 +204,5 @@ if data is not None and not data.empty:
     ax.legend(loc="upper left")
     ax.grid(True, alpha=0.3)
     st.pyplot(fig)
+else:
+    st.error("Nepodařilo se načíst data pro vybranou akcii.")
