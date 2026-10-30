@@ -80,7 +80,6 @@ def priprav_data_s_indexem(ticker, perioda="2y"):
 data = priprav_data_s_indexem(ticker_akcie, perioda="2y")
 
 if data is not None and not data.empty:
-    # Do učení jsme přidali 'Dist_SPY_Trend' -> model už ví, co dělá celá americká burza
     features = ['Dist_Fib_382', 'Dist_Fib_500', 'Dist_Fib_618', 'RSI', 'ATR_Percent', 'Dist_SPY_Trend']
     X = data[features]
     y = data['Target']
@@ -97,11 +96,15 @@ if data is not None and not data.empty:
     y_pred_test = model.predict(X_test)
     historicka_presnost = accuracy_score(y_test, y_pred_test) * 100
 
+    # === NEPRŮSTŘELNÉ VYTAŽENÍ PREDIKCE A JISTOTY ===
     raw_predikce = model.predict(X_dnes)
-    predikce = int(np.asarray(raw_predikce))
+    # Převedeme jakýkoliv formát (NumPy array, list, Pandas Series) na jednorozměrné pole a vezmeme první prvek
+    predikce = int(np.atleast_1d(raw_predikce)[0])
     
-    vysledek_pravdepodobnosti = model.predict_proba(X_dnes)
-    jistota = float(vysledek_pravdepodobnosti[predikce]) * 100
+    raw_pravdepodobnost = model.predict_proba(X_dnes)
+    # Zde bezpečně získáme pravděpodobnost pro vybranou třídu (0 nebo 1)
+    jistota = float(np.atleast_2d(raw_pravdepodobnost)[0][predikce]) * 100
+    # ===============================================
 
     aktualni_cena = float(data['Close'].iloc[-1])
     atr = float(data['ATR'].iloc[-1])
@@ -129,11 +132,8 @@ if data is not None and not data.empty:
     max_dolarovy_risk = kapital * (max_risk_procenta / 100.0)
     vzdalenost_sl = abs(aktualni_cena - stop_loss)
     
-    # Výpočet počtu kusů akcií (kontraktů), které si můžeme dovolit
-    doporuceny_pocet_kusu = max_dolarovy_risk / vzdalenost_sl
-    
-    # U XTB CFD na americké akcie odpovídá 1 Lot = 1 kus akcie (případně se zadává frakčně jako 0.01 atd.)
-    doporuceny_objem_loty = doporuceny_pocet_kusu
+    # Výpočet doporučeného objemu v lotech
+    doporuceny_objem_loty = max_dolarovy_risk / vzdalenost_sl
 
     # Zobrazení výsledků
     st.subheader(f"📋 Pokyny pro ruční zadání do XTB ({ticker_akcie} CFD)")
@@ -148,7 +148,7 @@ if data is not None and not data.empty:
     with col3:
         st.metric(label="Historická přesnost modelu", value=f"{historicka_presnost:.1f} %")
 
-    # Nový panel s přesným dávkováním peněz
+    # Panel s řízením rizika
     st.success(f"🛡️ **MANAGEMENT RIZIKA:** Při tomto obchodu riskuješ maximálně **{max_dolarovy_risk:.2f} USD**.")
     st.warning(f"👉 **CO ZADAT V XTB (xStation):** Otevři příkaz, nastav objem na **{doporuceny_objem_loty:.2f} Lotů**, zadej **SL: {stop_loss:.2f}** a **TP: {take_profit:.2f}**.")
 
