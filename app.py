@@ -87,15 +87,15 @@ if data is not None and not data.empty:
     y_pred_test = model.predict(X_test)
     historicka_presnost = accuracy_score(y_test, y_pred_test) * 100
 
-    # Predikce pro dnešní den
-    vysledek_predikce = model.predict(X_dnes)
-    predikce = int(vysledek_predikce[0]) # Opraveno na jisté vytažení skaláru
+    # Výpočet predikce jako čistého celého čísla (0 nebo 1)
+    raw_predikce = model.predict(X_dnes)
+    predikce = int(np.asarray(raw_predikce)[0])
     
+    # Výpočet pravděpodobnosti
     vysledek_pravdepodobnosti = model.predict_proba(X_dnes)
-    # Vytažení čisté hodnoty pravděpodobnosti z 2D matice [0][třída]
     jistota = float(vysledek_pravdepodobnosti[0][predikce]) * 100
 
-    # Bezpečné stažení skalárních hodnot
+    # Stažení skalárních hodnot z tržních dat
     aktualni_cena = float(data['Close'].iloc[-1])
     atr = float(data['ATR'].iloc[-1])
     fib_618 = float(data['Fib_618'].iloc[-1])
@@ -105,17 +105,23 @@ if data is not None and not data.empty:
 
     nasobek_atr = 1.0
 
-    # ZDE JE OPRAVENÁ LOGIKA:
+    # ROBUSTNÍ MATEMATICKÁ KONTROLA SMĚRU
     if predikce == 1:
         smer_text = "NÁKUP (BUY) 📈"
-        # U nákupu: SL je POD cenou (fib_618 je dole), TP je NAD cenou (high_50)
+        # Nákup: Hladina stop loss musí být pod aktuální cenou
         stop_loss = fib_618 - (atr * nasobek_atr)
         take_profit = high_50 - (atr * 0.5)
+        # Pojistka pro případ anomálie v datech
+        if stop_loss >= aktualni_cena:
+            stop_loss = aktualni_cena - (atr * 1.5)
     else:
         smer_text = "PRODEJ (SELL/SHORT) 📉"
-        # U prodeje: SL musí být NAD cenou (fib_382 je nahoře) PLUS ATR, TP musí být NIŽE (low_50)
+        # Prodej: Hladina stop loss musí být NAD aktuální cenou (fib_382 je rezistence nahoře)
         stop_loss = fib_382 + (atr * nasobek_atr)
         take_profit = low_50 + (atr * 0.5)
+        # Pojistka pro případ anomálie v datech
+        if stop_loss <= aktualni_cena:
+            stop_loss = aktualni_cena + (atr * 1.5)
 
     # Zobrazení výsledků ve Streamlitu
     st.subheader(f"📋 Pokyny pro ruční zadání do XTB ({ticker_akcie})")
