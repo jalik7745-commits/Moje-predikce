@@ -23,12 +23,6 @@ def priprav_data_s_atr(ticker, perioda="2y"):
         # Sjednocení názvů sloupců (očištění od balastu)
         df.columns = [str(col).strip() for col in df.columns]
         
-        # Kontrola standardních sloupců
-        potrebne_sloupce = ['High', 'Low', 'Close', 'Open']
-        if not all(col in df.columns for col in potens for col in potrebne_sloupce):
-            # Pokud by se sloupce jmenovaly jinak, zkusíme je najít v indexu
-            pass
-        
         # Výpočet ATR (Average True Range) - perioda 14
         high_low = df['High'] - df['Low']
         high_close = np.abs(df['High'] - df['Close'].shift(1))
@@ -98,7 +92,7 @@ if data is not None and not data.empty:
 
     nasobek_atr = 1.0
 
-    # Výpočet SL a TP podle směru
+    # Výpočet SL a TP podle směru a extrakce správného indexu z pravděpodobnosti
     if predikce == 1:
         smer_text = "NÁKUP (BUY) 📈"
         jistota = float(pravdepodobnost[1]) * 100
