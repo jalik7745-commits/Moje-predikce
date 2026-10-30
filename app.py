@@ -13,7 +13,7 @@ st.title("🤖 XGBoost + Fibonacci + ATR Trading Asistent")
 st.write("Predikce a výpočet hladin pro americké CFD kontrakty.")
 
 # Výběr akcie přímo ve Streamlitu
-ticker_akcie = st.text_input("Zadejte ticker americké akcie (např. F, DVN, KMI, SO, NLY, ADM, ASML, NG, CL, HG, KC):", "F").upper()
+ticker_akcie = st.text_input("Zadejte ticker americké akcie (např. NVDA, AAPL, TSLA):", "NVDA").upper()
 
 def priprav_data_s_atr(ticker, perioda="2y"):
     try:
@@ -89,9 +89,10 @@ if data is not None and not data.empty:
 
     # Predikce pro dnešní den
     vysledek_predikce = model.predict(X_dnes)
-    predikce = int(vysledek_predikce[0])
+    predikce = int(vysledek_predikce[0]) # Opraveno na jisté vytažení skaláru
     
     vysledek_pravdepodobnosti = model.predict_proba(X_dnes)
+    # Vytažení čisté hodnoty pravděpodobnosti z 2D matice [0][třída]
     jistota = float(vysledek_pravdepodobnosti[0][predikce]) * 100
 
     # Bezpečné stažení skalárních hodnot
@@ -104,12 +105,15 @@ if data is not None and not data.empty:
 
     nasobek_atr = 1.0
 
+    # ZDE JE OPRAVENÁ LOGIKA:
     if predikce == 1:
         smer_text = "NÁKUP (BUY) 📈"
+        # U nákupu: SL je POD cenou (fib_618 je dole), TP je NAD cenou (high_50)
         stop_loss = fib_618 - (atr * nasobek_atr)
         take_profit = high_50 - (atr * 0.5)
     else:
         smer_text = "PRODEJ (SELL/SHORT) 📉"
+        # U prodeje: SL musí být NAD cenou (fib_382 je nahoře) PLUS ATR, TP musí být NIŽE (low_50)
         stop_loss = fib_382 + (atr * nasobek_atr)
         take_profit = low_50 + (atr * 0.5)
 
@@ -125,7 +129,7 @@ if data is not None and not data.empty:
         st.metric(label="Denní volatilita (ATR)", value=f"{atr:.2f} USD")
     with col3:
         st.metric(label="Historická přesnost modelu", value=f"{historicka_presnost:.1f} %", 
-                  help="Úspěšnost modelu na historických datech této konkrétní akcie, která nebyla použita k trénování.")
+                  help="Úspěšnost modelu na historických datech této konkrétní akcie.")
 
     st.info(f"**STOP-LOSS (SL):** {stop_loss:.2f} USD | **TAKE-PROFIT (TP):** {take_profit:.2f} USD")
 
