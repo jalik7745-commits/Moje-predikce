@@ -10,15 +10,41 @@ from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 st.set_page_config(page_title="Inteligentní Skener Trhu", layout="wide")
 
-st.title("🛡️ Automatický XGBoost Skener & Asistent")
-st.write("Live přehled celého trhu na jedno kliknutí s automatickým vyhledáním signálů.")
+st.title("🛡️ Automatický XGBoost Skener (TOP 30 Akcií)")
+st.write("Live přehled 30 nejvhodnějších amerických mega-caps akcií na jedno kliknutí.")
 
-# --- SEZNAM OBCHODOVANÝCH AKCIÍ ---
+# --- DIGITÁLNÍ WATCHLIST: 30 NEJVHODNĚJŠÍCH AMERICKÝCH AKCIÍ ---
 watchlist = {
-    "Apple": "AAPL", "Microsoft": "MSFT", "NVIDIA": "NVDA", "Google": "GOOGL",
-    "Amazon": "AMZN", "Meta": "META", "Tesla": "TSLA", "Broadcom": "AVGO",
-    "AMD": "AMD", "Netflix": "NFLX", "Walmart": "WMT", "JPMorgan": "JPM",
-    "Visa": "V", "Eli Lilly": "LLY", "Caterpillar": "CAT"
+    "Abbott Laboratories": "ABT",
+    "Advanced Micro Devices": "AMD",
+    "Adobe Inc.": "ADBE",
+    "Alphabet / Google": "GOOGL",
+    "Amazon.com Inc.": "AMZN",
+    "Apple Inc.": "AAPL",
+    "Berkshire Hathaway": "BRK-B",
+    "Broadcom Inc.": "AVGO",
+    "Caterpillar Inc.": "CAT",
+    "Costco Wholesale": "COST",
+    "Eli Lilly & Co.": "LLY",
+    "Exxon Mobil Corp.": "XOM",
+    "Home Depot Inc.": "HD",
+    "Chevron Corp.": "CVX",
+    "Intel Corp.": "INTC",
+    "JPMorgan Chase & Co.": "JPM",
+    "Mastercard Inc.": "MA",
+    "Meta Platforms": "META",
+    "Microsoft Corp.": "MSFT",
+    "Netflix Inc.": "NFLX",
+    "NVIDIA Corp.": "NVDA",
+    "Oracle Corp.": "ORCL",
+    "PepsiCo Inc.": "PEP",
+    "Pfizer Inc.": "PFE",
+    "Procter & Gamble": "PG",
+    "Qualcomm Inc.": "QCOM",
+    "Salesforce Inc.": "CRM",
+    "Tesla Inc.": "TSLA",
+    "Visa Inc.": "V",
+    "Walmart Inc.": "WMT"
 }
 
 # --- SIDEBAR CONFIG ---
@@ -36,7 +62,7 @@ def ziskej_sentiment_zprav(ticker):
         return float(np.mean(skore)) if skore else 0.0
     except Exception: return 0.0
 
-@st.cache_data(ttl=3600) # Uloží data na 1 hodinu do paměti pro bleskové načítání
+@st.cache_data(ttl=3600) # Data se uloží na 1 hodinu pro bleskovou rychlost
 def analyzuj_akcii(ticker):
     try:
         df = yf.download(ticker, period="3y", multi_level_index=False, progress=False)
@@ -103,10 +129,10 @@ def analyzuj_akcii(ticker):
     except Exception: return None
 
 # --- HLAVNÍ BĚH SCANNERU ---
-st.subheader("📊 Živý přehled celého trhu")
+st.subheader("📊 Živý přehled celého trhu (Skenování 30 firem)")
 vysledky_list = []
 
-with st.spinner("🔄 Algoritmus skenuje kompletní trh a zprávy..."):
+with st.spinner("🔄 Algoritmus skenuje 30 firem, index S&P 500 a živé zprávy..."):
     for jmeno, tkr in watchlist.items():
         res = analyzuj_akcii(tkr)
         if res:
@@ -117,20 +143,17 @@ with st.spinner("🔄 Algoritmus skenuje kompletní trh a zprávy..."):
             })
 
 df_watchlist = pd.DataFrame(vysledky_list)
-# Seřadíme tabulku tak, aby nákupní signály byly hned nahoře
 df_watchlist = df_watchlist.sort_values(by=["Doporučený příkaz", "Pravděpodobnost růstu"], ascending=[False, False])
 
-# Formátování zobrazení procent
 df_watchlist["Pravděpodobnost růstu"] = df_watchlist["Pravděpodobnost růstu"].map("{:.1f} %".format)
 df_watchlist["Historická přesnost"] = df_watchlist["Historická přesnost"].map("{:.1f} %".format)
 
-# Vykreslení interaktivní tabulky
 st.dataframe(df_watchlist, use_container_width=True, hide_index=True)
 
 st.markdown("---")
 # --- DETAILNÍ POKYNY POD TABULKOU ---
 st.subheader("🔍 Detailní instrukce a graf vybrané akcie")
-vybrana_akcie_box = st.selectbox("Pokud chceš vidět graf a přesné Loty pro XTB, zvol akcii zde:", list(watchlist.keys()))
+vybrana_akcie_box = st.selectbox("Zvol akcii pro zobrazení grafu a přesných pokynů pro XTB:", list(watchlist.keys()))
 ticker_vybrane = watchlist[vybrana_akcie_box]
 
 res_detail = analyzuj_akcii(ticker_vybrane)
@@ -141,7 +164,6 @@ if res_detail:
     sl_d = cena_d - (atr_d * 1.0)
     tp_d = cena_d + (atr_d * 2.0)
     if res_detail['Pravdepodobnost'] < 60.0:
-        # Pokud je stav čekej, SL/TP dáme cvičně, ale příkaz zablokujeme
         sl_d = res_detail['Fib_618'] - atr_d
         tp_d = res_detail['High_50'] - (atr_d * 0.5)
         if sl_d >= cena_d: sl_d = cena_d - (atr_d * 1.5)
@@ -153,7 +175,7 @@ if res_detail:
         st.success(f"🔥 **SIGNÁL AKTIVNÍ:** V XTB otevři **BUY** příkaz na **{vybrana_akcie_box}**.")
         st.warning(f"👉 **NASTAVENÍ PRO XTB:** Objem: **{loty_d:.2f} Lotů** | STOP-LOSS: **{sl_d:.2f} USD** | TAKE-PROFIT: **{tp_d:.2f} USD**")
     else:
-        st.info("⏳ pro tuto akcii dnes platí pokyn **ČEKEJ**. Neriskuj peníze a vyčkej na zelený signál v tabulce výše.")
+        st.info("⏳ Pro tuto akcii dnes platí pokyn **ČEKEJ**. Neriskuj peníze a vyčkej na zelený signál v tabulce výše.")
 
     # Graf
     fig, ax = plt.subplots(figsize=(10, 3.5))
@@ -166,3 +188,5 @@ if res_detail:
     ax.legend(loc="upper left")
     ax.grid(True, alpha=0.2)
     st.pyplot(fig)
+else:
+    st.error("Nepodařilo se načíst data.")
