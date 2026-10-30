@@ -105,8 +105,7 @@ def priprav_data_trend(ticker, perioda="8y"):
         df['Sentiment'] = np.where(df['Close'] > df['Close'].shift(1), zivy_sentiment * 0.8 + 0.1, zivy_sentiment * 0.8 - 0.1)
         df.loc[df.index[-1], 'Sentiment'] = zivy_sentiment
         
-        # --- NOVÝ CÍL (TARGET): Hledáme silný růstový impuls v příštích 5 dnech ---
-        # 1 = cena během 5 dnů vzroste o více než 1.5x násobek ATR (silný trend)
+        # CÍL (TARGET): Hledáme silný růstový impuls v příštích 5 dnech
         budouci_max = df['High'].shift(-5).rolling(window=5).max()
         df['Target'] = (budouci_max > (df['Close'] + (df['ATR'] * 1.5))).astype(int)
         
@@ -128,7 +127,6 @@ if data is not None and not data.empty:
 
     X_train, X_test, y_train, y_test = train_test_split(X_historie, y_historie, test_size=0.2, shuffle=False)
 
-    # Optimalizace pro vyhledávání vzácnějších silných trendů
     model = XGBClassifier(n_estimators=150, max_depth=4, learning_rate=0.03, subsample=0.8, random_state=42, eval_metric='logloss')
     model.fit(X_train, y_train)
 
@@ -136,20 +134,20 @@ if data is not None and not data.empty:
     historicka_presnost = accuracy_score(y_test, y_pred_test) * 100
 
     raw_pravdepodobnost = model.predict_proba(X_dnes)
+    # Získání pravděpodobnosti růstu (index 1)
     pravdepodobnost_rustu = float(pd.DataFrame(raw_pravdepodobnost).iloc[0, 1]) * 100
 
     aktualni_cena = float(data['Close'].iloc[-1])
     atr = float(data['ATR'].iloc[-1])
     
     # --- ASYMETRICKÉ ŘÍZENÍ PŘÍKAZU (RRR 1:2) ---
-    stop_loss = aktualni_cena - (atr * 1.0)    # Riskujeme pouze 1x běžný denní pohyb
-    take_profit = aktualni_cena + (atr * 2.0)  # Cílíme na 2x větší zisk
+    stop_loss = aktualni_cena - (atr * 1.0)    
+    take_profit = aktualni_cena + (atr * 2.0)  
     
     max_dolarovy_risk = kapital * (max_risk_procenta / 100.0)
     vzdalenost_sl = abs(aktualni_cena - stop_loss)
     doporuceny_objem_loty = max_dolarovy_risk / vzdalenost_sl
 
-    # Slovní vyhodnocení filtru
     if pravdepodobnost_rustu >= 60.0:
         smer_text = "NÁKUP (BUY) 📈"
         barva_boxu = st.success
@@ -173,7 +171,9 @@ if data is not None and not data.empty:
                   help="Úspěšnost modelu při správném označení začátku silného pohybu v minulosti.")
 
     barva_boxu(f"🛡️ **MANAGEMENT RIZIKA:** Pokud systém vygeneruje signál, riskuješ maximálně **{max_dolarovy_risk:.2f} USD**.")
-    st.markdown(f"<div style='background-color:#f0f2f6;padding:15px;border-radius:5px;'>{pokyn_text}</div>", unsafe_value=True)
+    
+    # OPRAVENO: Správný parametr unsafe_allow_html=True
+    st.markdown(f"<div style='background-color:#f0f2f6;padding:15px;border-radius:5px;color:black;'>{pokyn_text}</div>", unsafe_allow_html=True)
 
     # --- GRAF ---
     fig, ax = plt.subplots(figsize=(10, 3.5))
