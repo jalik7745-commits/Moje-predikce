@@ -20,7 +20,7 @@ def priprav_data_s_atr(ticker, perioda="2y"):
             return None
         
         # Ošetření MultiIndexu u novějších verzí yfinance
-        df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
+        df.columns = [col if isinstance(col, tuple) else col for col in df.columns]
         
         # Výpočet ATR (Average True Range) - perioda 14
         high_low = df['High'] - df['Low']
@@ -60,7 +60,7 @@ def priprav_data_s_atr(ticker, perioda="2y"):
         st.error(f"Chyba při zpracování dat: {e}")
         return None
 
-# Spuštění analýzy po zadání tickeru
+# Spuštění analýzy
 data = priprav_data_s_atr(ticker_akcie, perioda="2y")
 
 if data is not None and not data.empty:
@@ -78,27 +78,27 @@ if data is not None and not data.empty:
     model = XGBClassifier(n_estimators=100, max_depth=4, learning_rate=0.05, random_state=42, eval_metric='logloss')
     model.fit(X_train, y_train)
 
-    predikce = model.predict(X_dnes)[0]
-    pravdepodobnost = model.predict_proba(X_dnes)[0]
+    predikce = model.predict(X_dnes)
+    pravdepodobnost = model.predict_proba(X_dnes)
 
     # Načtení aktuálních hodnot
-    aktualni_cena = float(data['Close'].iloc[-1])
-    atr = float(data['ATR'].iloc[-1])
-    fib_618 = float(data['Fib_618'].iloc[-1])
-    fib_382 = float(data['Fib_382'].iloc[-1])
-    high_50 = float(data['High_50'].iloc[-1])
-    low_50 = float(data['Low_50'].iloc[-1])
+    aktualni_cena = float(data['Close'].iloc[-1].item())
+    atr = float(data['ATR'].iloc[-1].item())
+    fib_618 = float(data['Fib_618'].iloc[-1].item())
+    fib_382 = float(data['Fib_382'].iloc[-1].item())
+    high_50 = float(data['High_50'].iloc[-1].item())
+    low_50 = float(data['Low_50'].iloc[-1].item())
 
     nasobek_atr = 1.0
 
     if predikce == 1:
         smer_text = "NÁKUP (BUY) 📈"
-        jistota = pravdepodobnost[1] * 100
+        jistota = pravdepodobnost[0][1] * 100
         stop_loss = fib_618 - (atr * nasobek_atr)
         take_profit = high_50 - (atr * 0.5)
     else:
         smer_text = "PRODEJ (SELL/SHORT) 📉"
-        jistota = pravdepodobnost[0] * 100
+        jistota = pravdepodobnost[0][0] * 100
         stop_loss = fib_382 + (atr * nasobek_atr)
         take_profit = low_50 + (atr * 0.5)
 
@@ -109,7 +109,7 @@ if data is not None and not data.empty:
         st.metric(label="Doporučený směr", value=smer_text)
         st.metric(label="Aktuální cena", value=f"{aktualni_cena:.2f} USD")
     with col2:
-        st.metric(label="Pravděpodobnost / Jistota", value=f"{jistota:.2f} %")
+        st.metric(label="Jistota modelu", value=f"{jistota:.2f} %")
         st.metric(label="Denní volatilita (ATR)", value=f"{atr:.2f} USD")
 
     st.info(f"**STOP-LOSS (SL):** {stop_loss:.2f} USD | **TAKE-PROFIT (TP):** {take_profit:.2f} USD")
@@ -127,5 +127,4 @@ if data is not None and not data.empty:
     ax.legend(loc="upper left")
     ax.grid(True, alpha=0.3)
     
-    # Správné zobrazení grafu ve Streamlitu
     st.pyplot(fig)
