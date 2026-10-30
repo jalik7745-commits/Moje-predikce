@@ -11,7 +11,7 @@ from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 st.set_page_config(page_title="Inteligentní Trading Asistent", layout="wide")
 
 st.title("🛡️ Risk-Aware XGBoost Trading Asistent")
-st.write("Model zaměřený na zachycení silných trendů s vysokým poměrem zisku k riziku (RRR 1:2).")
+st.write("Model zaměřený na zachycení silných trendů s vysokým poměrem zisku k riziku (RRR 1:2) a Fibonacciho konfluencí.")
 
 # --- SIDEBAR: WATCHLIST & RIZIKO ---
 st.sidebar.header("📋 Tvůj digitální Watchlist")
@@ -34,7 +34,7 @@ watchlist = {
     "Caterpillar (CAT)": "CAT"
 }
 
-vybrany_nazev = st.sidebar.selectbox("Vyber akcii k analýze:", list(watchlist.keys()))
+vybrany_nazev = st.sidebar.selectbox("Vyber akcii k ANALÝZE:", list(watchlist.keys()))
 ticker_akcie = watchlist[vybrany_nazev]
 
 st.sidebar.markdown("---")
@@ -134,7 +134,6 @@ if data is not None and not data.empty:
     historicka_presnost = accuracy_score(y_test, y_pred_test) * 100
 
     raw_pravdepodobnost = model.predict_proba(X_dnes)
-    # Získání pravděpodobnosti růstu (index 1)
     pravdepodobnost_rustu = float(pd.DataFrame(raw_pravdepodobnost).iloc[0, 1]) * 100
 
     aktualni_cena = float(data['Close'].iloc[-1])
@@ -172,16 +171,22 @@ if data is not None and not data.empty:
 
     barva_boxu(f"🛡️ **MANAGEMENT RIZIKA:** Pokud systém vygeneruje signál, riskuješ maximálně **{max_dolarovy_risk:.2f} USD**.")
     
-    # OPRAVENO: Správný parametr unsafe_allow_html=True
     st.markdown(f"<div style='background-color:#f0f2f6;padding:15px;border-radius:5px;color:black;'>{pokyn_text}</div>", unsafe_allow_html=True)
 
-    # --- GRAF ---
-    fig, ax = plt.subplots(figsize=(10, 3.5))
+    # --- GRAF S FIBONACCIHO LINIEI ZPĚT NA OBRAZOVCE ---
+    fig, ax = plt.subplots(figsize=(10, 4))
     posledni_dny = data.tail(60)
     ax.plot(posledni_dny.index, posledni_dny['Close'], color='black', label=f'Cena {ticker_akcie}', linewidth=2)
+    
+    # Navrácení linií Fibonacciho posloupnosti
+    ax.plot(posledni_dny.index, posledni_dny['Fib_618'], color='purple', linestyle='--', alpha=0.5, label='Fib 61.8% (Podlaha)')
+    ax.plot(posledni_dny.index, posledni_dny['Fib_382'], color='orange', linestyle='--', alpha=0.5, label='Fib 38.2% (Strop)')
+    
+    # Hladiny příkazu
     ax.axhline(y=stop_loss, color='red', linestyle=':', linewidth=2, label=f'SL ({stop_loss:.2f})')
     ax.axhline(y=take_profit, color='green', linestyle=':', linewidth=2, label=f'TP ({take_profit:.2f})')
-    ax.set_title(f"Technická mapa pro {ticker_akcie}")
+    
+    ax.set_title(f"Technická mapa trhu pro {ticker_akcie}")
     ax.legend(loc="upper left")
     ax.grid(True, alpha=0.3)
     st.pyplot(fig)
