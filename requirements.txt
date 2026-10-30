@@ -2,8 +2,6 @@ streamlit
 yfinance
 pandas
 numpy
-plotly
-scikit-learn
+matplotlib
 xgboost
-requests
-nltk
+scikit-learn
